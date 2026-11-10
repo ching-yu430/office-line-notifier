@@ -24,7 +24,8 @@ Deno.serve(async req=>{
  const code=generateCode();await rpc('office_command',{actor:user.id,action,payload:{teacher_id:payload.teacher_id,digest:await hashCode(code,env('BINDING_PEPPER'))}});
  return reply({code,expires_at:new Date(Date.now()+7*86400000).toISOString()});
  }
- if(['handover_create','handover_complete'].includes(action)) return reply({data:await rpc('handover_command',{actor:user.id,action,payload})});
+ if(['handover_create','handover_complete','handover_edit','handover_reopen'].includes(action)) return reply({data:await rpc('handover_command',{actor:user.id,action,payload})});
+ if(action==='internal_note_create') return reply({data:await rpc('internal_note_command',{actor:user.id,payload})});
  if(['send','dispatch'].includes(action) && env('LINE_SEND_ENABLED')!=='true') return reply({error:'真實發送尚未啟用，請先完成測試與核准'},409);
  const data=await rpc('office_command',{actor:user.id,action,payload});
  if(['send','dispatch'].includes(action)) {

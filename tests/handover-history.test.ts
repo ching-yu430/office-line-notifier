@@ -2,7 +2,7 @@ import{describe,it,expect}from'vitest';
 import{taipeiDay,filterHandoverHistory,filterDatedRecords}from'../src/handover-history';
 import type{Handover}from'../src/api';
 const now=new Date('2026-11-10T01:00:00Z');
-const h=(id:string,completed_at:string|null):Handover=>({id,content:id,created_by:'test',creator_name:'帳號甲',handover_name:'交接甲',created_at:'2026-11-01T00:00:00Z',completed_at,completed_by:completed_at?'test':null,completed_name:completed_at?'帳號乙':null,finisher_name:completed_at?'完成乙':null});
+const h=(id:string,completed_at:string|null):Handover=>({id,content:id,created_by:'test',version:1,creator_name:'帳號甲',handover_name:'交接甲',created_at:'2026-11-01T00:00:00Z',completed_at,completed_by:completed_at?'test':null,completed_name:completed_at?'帳號乙':null,finisher_name:completed_at?'完成乙':null});
 describe('台灣時間交接紀錄篩選',()=>{
  it('台灣日期在 UTC 16:00 換日',()=>{expect(taipeiDay(new Date('2026-11-09T15:59:59Z'))).toBe('2026-11-09');expect(taipeiDay(new Date('2026-11-09T16:00:00Z'))).toBe('2026-11-10');});
  it('今日僅依完成時間篩選，不以建立日期計算',()=>{const items=[h('昨天','2026-11-09T15:59:59Z'),h('今日','2026-11-09T16:00:00Z'),h('明日','2026-11-10T16:00:00Z'),h('未完成',null)];expect(filterHandoverHistory(items,'today','',now).map(h=>h.id)).toEqual(['今日']);});

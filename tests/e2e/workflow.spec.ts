@@ -64,3 +64,31 @@ test('系統管理：左右配置、兩種紀錄獨立篩選、分頁與固定�
  await audit.getByRole('button',{name:'特定日期',exact:true}).click();await audit.getByLabel('操作紀錄日期',{exact:true}).fill(oldDay);await expect(audit.locator('.record-audit')).toHaveCount(1);await expect(details.getByLabel('交接紀錄日期',{exact:true})).toHaveValue('2000-01-01');await audit.getByLabel('操作紀錄日期',{exact:true}).fill('2000-01-01');await expect(audit.locator('.history-list')).toContainText('此日期沒有操作紀錄');
  await page.setViewportSize({width:390,height:844});await details.locator('summary').click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
+
+test('對話內部備註：獨立保存、切換教師與重新整理，不混入 LINE 訊息',async({page})=>{
+ await page.goto('/');await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師甲'}).click();const count=await page.locator('.messages .message').count();
+ await page.locator('.internal-notes summary').click();await page.getByLabel('新增內部備註',{exact:true}).fill('老師請下午再聯絡，僅供辦公室交接。');await page.getByRole('button',{name:'儲存內部備註',exact:true}).click();await expect(page.locator('.internal-note-list')).toContainText('老師請下午再聯絡，僅供辦公室交接。');await expect(page.locator('.messages')).not.toContainText('僅供辦公室交接');await expect(page.locator('.messages .message')).toHaveCount(count);
+ await page.locator('.chat-list button').filter({hasText:'示範教師丙'}).click();await expect(page.locator('.internal-note-list')).not.toContainText('老師請下午再聯絡');
+ await page.reload();await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師甲'}).click();await page.locator('.internal-notes summary').click();await expect(page.locator('.internal-note-list')).toContainText('老師請下午再聯絡');await expect(page.locator('.internal-note-list')).toContainText('示範管理員');
+});
+
+test('交接更正與恢復：姓名、內容、完成狀態與修改前後紀錄',async({page})=>{
+ await page.goto('/');await page.getByRole('button',{name:'新增交接',exact:true}).click();await page.getByLabel('交接人',{exact:true}).fill('交接誤名');await page.getByLabel('交接內容').fill('原交接內容');await page.getByRole('button',{name:'儲存交接',exact:true}).click();
+ const pending=page.locator('#handovers .handover-row');await pending.getByRole('button',{name:'更正',exact:true}).click();await page.getByLabel('交接人',{exact:true}).fill('交接正名');await page.getByLabel('交接內容').fill('更正後交接內容');await page.getByLabel('更正原因（選填）').fill('修正內容與姓名');await page.getByRole('button',{name:'儲存更正',exact:true}).click();await expect(pending).toContainText('更正後交接內容');
+ await pending.getByRole('button',{name:'標記完成'}).click();await page.getByLabel('完成人姓名').fill('完成誤名');await page.getByRole('button',{name:'確認完成',exact:true}).click();await page.getByRole('button',{name:'系統管理',exact:true}).click();await page.locator('.handover-history summary').click();const done=page.locator('.handover-history .handover-row');
+ await done.getByRole('button',{name:'更正',exact:true}).click();await page.getByLabel('完成人姓名').fill('完成正名');await page.getByRole('button',{name:'儲存更正',exact:true}).click();await expect(done).toContainText('完成正名');
+ await done.getByRole('button',{name:'修改紀錄',exact:true}).click();const edit=page.locator('.handover-change').filter({hasText:'更正交接'}).first();await edit.locator('summary').click();await expect(edit).toContainText('完成誤名');await expect(edit).toContainText('完成正名');await page.getByRole('button',{name:'關閉',exact:true}).click();
+ await done.getByRole('button',{name:'恢復待處理',exact:true}).click();await page.getByLabel('恢復原因（選填）').fill('尚未完成確認');await page.getByRole('button',{name:'確認恢復',exact:true}).click();await expect(page.locator('.handover-history .handover-row')).toHaveCount(0);
+ await page.getByRole('button',{name:'值班工作台',exact:true}).click();await expect(pending).toContainText('更正後交接內容');await expect(pending).toContainText('交接正名');await pending.getByRole('button',{name:'修改紀錄',exact:true}).click();const reopened=page.locator('.handover-change').filter({hasText:'恢復待處理'});await reopened.locator('summary').click();await expect(reopened).toContainText('完成正名');await expect(reopened).toContainText('尚未完成確認');await expect(reopened).toContainText('已完成');await expect(reopened).toContainText('待處理');
+});
+
+test('通知紀錄：發送失敗與結果未明篩選，可與教師及處理狀態搭配',async({page})=>{
+ await page.addInitScript(()=>{
+  const now=new Date().toISOString();const teacher=(id:string,name:string)=>({id,name,department:'測試',notes:'',active:true,bound_at:now,last_notified_at:now});
+  const notice=(id:string,teacher_id:string,send_status:string,status:string)=>({id,teacher_id,send_status,status,content:id,kind:'mail',important:false,sender_id:'demo-admin',created_at:now});
+  localStorage.setItem('office-line-demo-v1',JSON.stringify({teachers:[teacher('a','教師甲'),teacher('b','教師乙')],notifications:[notice('甲失敗','a','failed','待領取'),notice('乙失敗','b','failed','已完成'),notice('結果不明','a','uncertain','待回覆'),notice('已接受','a','accepted','待領取'),notice('待傳送','b','queued','待領取')],messages:[],staff:[{id:'demo-admin',display_name:'示範管理員',role:'admin',active:true}],templates:[],audit_logs:[],conversations:[],handovers:[]}));
+ });
+ await page.goto('/');await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await expect(page.locator('tbody tr')).toHaveCount(5);await page.getByLabel('發送結果',{exact:true}).selectOption('failed');await expect(page.locator('tbody tr')).toHaveCount(2);await page.getByLabel('教師篩選').selectOption('a');await expect(page.locator('tbody tr')).toHaveCount(1);await expect(page.locator('tbody')).toContainText('甲失敗');
+ await page.getByLabel('處理狀態',{exact:true}).selectOption('已完成');await expect(page.locator('tbody tr')).toHaveCount(0);await page.getByLabel('教師篩選').selectOption('');await expect(page.locator('tbody tr')).toHaveCount(1);await expect(page.locator('tbody')).toContainText('乙失敗');
+ await page.getByLabel('處理狀態',{exact:true}).selectOption('全部狀態');await page.getByLabel('發送結果',{exact:true}).selectOption('uncertain');await expect(page.locator('tbody tr')).toHaveCount(1);await expect(page.locator('.info')).toContainText('避免重複發送');await page.getByLabel('發送結果',{exact:true}).selectOption('accepted');await expect(page.locator('tbody tr')).toHaveCount(1);await expect(page.locator('tbody')).toContainText('已接受');
+});

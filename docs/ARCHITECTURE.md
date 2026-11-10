@@ -82,3 +82,11 @@ Realtime 僅發布 safe tables，前端依 RLS 讀取並重新載入最新資料
 新增 handover_name、finisher_name 保存實際填寫的交接人／完成人。原始 created_by、completed_by 與帳號顯示姓名快照仍由驗證後的 actor 產生，供稽核，不能透過輸入姓名改寫帳號歸屬。兩個手填欄位皆有非空白、80 字上限驗證，完成重試維持原姓名與時間不變。
 
 已完成列表移入原生 details／summary，預設收合，依 Asia/Taipei 的完成日期篩選（今日、含今日七天、指定日期），每頁五筆且列表限制高度。未完成事項始終可見。新增 migration 保留舊姓名快照並回填手填姓名欄位，不刪除舊紀錄。
+
+### 內部備註與交接版本
+
+internal_notes 使用獨立 teacher_id 與作者帳號／姓名快照，與 LINE messages 分開。internal_note_command 驗證有效行政角色、教師 active、長度及 UUID 去重，交易式新增備註與 audit_logs 關聯；Edge 將此操作獨立路由到該 RPC，不經過 LINE 發送分支。
+
+handovers 增加整數 version；handover_edit／handover_reopen 必須帶 expected_version，資料列 FOR UPDATE 後比較版本，不一致時拒絕。更正、完成與恢復會增加版本；恢復清空目前的完成欄位，但同交易寫入 handover_revisions 的 before_data／after_data，保留原完成帳號、姓名與時間。更正手填姓名不更動帳號歸屬。版本快照只新增、前端無修改／刪除權限。
+
+新表皆 RLS + 明確 SELECT grant，只允許有效行政讀取；寫入 RPC 皆 SECURITY INVOKER、空 search_path、撤銷 PUBLIC／anon／authenticated EXECUTE，只授權 service_role。後端再次驗證 actor，不信任傳入作者欄位。備註與版本表均加入 Realtime，僅辦公室端 Auth 使用者可讀。

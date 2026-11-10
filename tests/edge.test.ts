@@ -24,3 +24,8 @@ it('一般行政建立交接不需開啟 LINE 發送，且只呼叫交接 RPC',a
  const response=await admin(request({action:'handover_create',payload:{id:'handover-test',content:'測試交接',created_by:'spoofed'}},'valid'));expect(response.status).toBe(200);
  expect(mocks.rpc).toHaveBeenCalledWith('handover_command',{actor:'test-user',action:'handover_create',payload:{id:'handover-test',content:'測試交接',created_by:'spoofed'}});expect(mocks.line).not.toHaveBeenCalled();
 });
+
+it('內部備註、更正與恢復在 LINE 停用時仍可操作，完全不呼叫 LINE',async()=>{
+ for(const action of ['internal_note_create','handover_edit','handover_reopen']){mocks.rpc.mockClear();const response=await admin(request({action,payload:{id:'test',teacher_id:'teacher',content:'內部事項'}},'valid'));expect(response.status).toBe(200);expect(mocks.rpc.mock.calls[0][0]).toBe(action==='internal_note_create'?'internal_note_command':'handover_command');expect(mocks.rpc.mock.calls[0][1].actor).toBe('test-user');}
+ expect(mocks.line).not.toHaveBeenCalled();
+});

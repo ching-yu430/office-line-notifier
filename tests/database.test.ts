@@ -8,7 +8,7 @@ const cmd=async(actor:string,action:string,payload:any)=> (await db.query<{v:any
 const teacher=async()=> (await cmd(admin,'teacher_save',{name:'虛構測試教師',department:'測試',notes:''})).teacher_id as string;
 const issue=(t:string,d:string)=>cmd(admin,'issue_code',{teacher_id:t,digest:d});
 const event=async(uid:string,digest:string,extra:any={})=>(await db.query<{v:any}>('select public.line_event($1::jsonb,$2) v',[JSON.stringify({webhookEventId:'e'+(++seq),type:'message',source:{type:'user',userId:uid},message:{id:'m'+seq,type:'text',text:'測試回覆'},...extra}),digest])).rows[0].v;
-beforeAll(async()=>{db=new PGlite();await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;create publication supabase_realtime;insert into auth.users values('${admin}'),('${staff}'),('${outsider}');`);await db.exec(readFileSync('supabase/migrations/20261110023211_office_schema.sql','utf8'));await db.exec(readFileSync('supabase/migrations/20261110062132_handovers.sql','utf8'));await db.exec(`insert into public.staff values('${admin}','測試管理員','admin',true),('${staff}','測試行政','staff',true)`);await db.exec(`insert into public.handovers(id,content,created_by,creator_name,completed_at,completed_by,completed_name) values('00000000-0000-4000-8000-000000000051','舊版已完成交接','${admin}','舊建立姓名',now(),'${staff}','舊完成姓名')`);await db.exec(readFileSync('supabase/migrations/20261110064708_handover_names.sql','utf8'));},30000);
+beforeAll(async()=>{db=new PGlite();await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;create publication supabase_realtime;insert into auth.users values('${admin}'),('${staff}'),('${outsider}');`);await db.exec(readFileSync('supabase/migrations/20261110023211_office_schema.sql','utf8'));await db.exec(readFileSync('supabase/migrations/20261110062132_handovers.sql','utf8'));await db.exec(`insert into public.staff values('${admin}','測試管理員','admin',true),('${staff}','測試行政','staff',true)`);await db.exec(`insert into public.handovers(id,content,created_by,creator_name,completed_at,completed_by,completed_name) values('00000000-0000-4000-8000-000000000051','舊版已完成交接','${admin}','舊建立姓名',now(),'${staff}','舊完成姓名')`);await db.exec(readFileSync('supabase/migrations/20261110064708_handover_names.sql','utf8'));await db.exec(readFileSync('supabase/migrations/20261110075630_internal_notes_and_handover_changes.sql','utf8'));},30000);
 afterAll(async()=>{await db?.close();});
 describe('真實 PostgreSQL 引擎：交易、綁定、權限與通知',()=>{
  it('有效碼成功綁定、用後刪除並留下時間與稽核',async()=>{const t=await teacher();await issue(t,'valid');expect((await event('Uvalid','valid')).reply).toContain('身分綁定成功');expect((await db.query('select * from private.binding_codes where teacher_id=$1',[t])).rows).toHaveLength(0);expect((await db.query<any>('select bound_at from public.teachers where id=$1',[t])).rows[0].bound_at).toBeTruthy();});
@@ -75,5 +75,51 @@ describe('填寫交接與完成人姓名',()=>{
   const h=await handover(admin,'handover_create',{id:crypto.randomUUID(),content:'等待完成'});
   for(const finisher_name of ['', '  ', '乙'.repeat(81),null])await expect(handover(staff,'handover_complete',{id:h.id,finisher_name})).rejects.toThrow('完成人姓名');
   expect((await db.query<any>('select completed_at from public.handovers where id=$1',[h.id])).rows[0].completed_at).toBeNull();
+ });
+});
+
+const noteCommand=async(actor:string,payload:any)=>(await db.query<{v:any}>('select public.internal_note_command($1,$2::jsonb) v',[actor,JSON.stringify(payload)])).rows[0].v;
+describe('內部備註隔離與權限',()=>{
+ it('存入獨立資料表且不產生 LINE 訊息或通知，作者不可偽造',async()=>{
+  const t=await teacher(),payload={id:crypto.randomUUID(),teacher_id:t,content:'  下班前再聯絡  ',author_id:admin,author_name:'假作者'};
+  const before=(await db.query<any>('select (select count(*) from public.messages)::int m,(select count(*) from public.notifications)::int n')).rows[0];
+  const n=await noteCommand(staff,payload);expect(n.content).toBe('下班前再聯絡');expect(n.author_id).toBe(staff);expect(n.author_name).toBe('測試行政');expect(await noteCommand(staff,payload)).toEqual(n);
+  expect((await db.query<any>('select (select count(*) from public.messages)::int m,(select count(*) from public.notifications)::int n')).rows[0]).toEqual(before);
+  expect((await db.query('select * from public.audit_logs where internal_note_id=$1',[n.id])).rows).toHaveLength(1);
+ });
+ it('拒絕重用編號改寫或串到另一教師，驗證空白及未知帳號',async()=>{
+  const t=await teacher(),payload={id:crypto.randomUUID(),teacher_id:t,content:'備註'};await noteCommand(admin,payload);
+  await expect(noteCommand(admin,{...payload,teacher_id:await teacher()})).rejects.toThrow('不一致');await expect(noteCommand(staff,payload)).rejects.toThrow('不一致');
+  for(const content of ['', '  ', '字'.repeat(2001)])await expect(noteCommand(staff,{id:crypto.randomUUID(),teacher_id:t,content})).rejects.toThrow('2000');
+  await expect(noteCommand(outsider,payload)).rejects.toThrow('未授權');await expect(noteCommand(staff,{...payload,id:crypto.randomUUID(),teacher_id:crypto.randomUUID()})).rejects.toThrow('不存在');
+ });
+ it('RLS 拒絕未授權讀取及前端直寫，備註 RPC 僅限服務端',async()=>{
+  await db.exec(`set role authenticated;set request.jwt.claim.sub='${outsider}';`);try{expect((await db.query('select * from public.internal_notes')).rows).toHaveLength(0);expect((await db.query('select * from public.handover_revisions')).rows).toHaveLength(0);await expect(db.query('select public.internal_note_command($1,$2::jsonb)',[staff,'{}'])).rejects.toThrow('permission');await expect(db.query("delete from public.handover_revisions")).rejects.toThrow('permission');}finally{await db.exec('reset role');}
+  await db.exec(`set role authenticated;set request.jwt.claim.sub='${staff}';`);try{expect((await db.query('select * from public.internal_notes')).rows.length).toBeGreaterThan(0);await expect(db.query('delete from public.internal_notes')).rejects.toThrow('permission');}finally{await db.exec('reset role');}
+ });
+});
+describe('交接更正、恢復與不可覆蓋的修改紀錄',()=>{
+ it('更正已完成內容與姓名，保留帳號與完成時間及前後版本',async()=>{
+  let h=await handover(admin,'handover_create',{id:crypto.randomUUID(),content:'原內容'});h=await handover(staff,'handover_complete',{id:h.id,finisher_name:'原完成人'});
+  const changed=await handover(admin,'handover_edit',{id:h.id,expected_version:h.version,content:'更正內容',handover_name:'更正交接人',finisher_name:'更正完成人',reason:'修正誤字',created_by:staff,completed_by:admin});
+  expect(changed.version).toBe(h.version+1);expect(changed.created_by).toBe(admin);expect(changed.completed_by).toBe(staff);expect(changed.completed_at).toBe(h.completed_at);expect(changed.finisher_name).toBe('更正完成人');
+  const rev=(await db.query<any>("select * from public.handover_revisions where handover_id=$1 and action='handover_edit'",[h.id])).rows[0];expect(rev.before_data.content).toBe('原內容');expect(rev.before_data.finisher_name).toBe('原完成人');expect(rev.after_data.content).toBe('更正內容');expect(rev.actor_id).toBe(admin);expect(rev.reason).toBe('修正誤字');
+ });
+ it('拒絕過期版本，避免覆蓋另一位人員的更正',async()=>{
+  const h=await handover(admin,'handover_create',{id:crypto.randomUUID(),content:'原版本'});await handover(staff,'handover_edit',{id:h.id,expected_version:h.version,content:'新版本'});
+  await expect(handover(admin,'handover_edit',{id:h.id,expected_version:h.version,content:'舊畫面修改'})).rejects.toThrow('已被更新');
+  expect((await db.query<any>('select content from public.handovers where id=$1',[h.id])).rows[0].content).toBe('新版本');expect((await db.query("select * from public.handover_revisions where handover_id=$1 and action='handover_edit'",[h.id])).rows).toHaveLength(1);
+ });
+ it('恢復待處理保留原完成姓名與時間，重複恢復不多寫紀錄',async()=>{
+  let h=await handover(admin,'handover_create',{id:crypto.randomUUID(),content:'誤按完成'});h=await handover(staff,'handover_complete',{id:h.id,finisher_name:'先前完成人'});
+  const reopened=await handover(admin,'handover_reopen',{id:h.id,expected_version:h.version,reason:'尚待確認'});expect(reopened.completed_at).toBeNull();expect(reopened.finisher_name).toBeNull();expect(reopened.completed_by).toBeNull();
+  expect(await handover(admin,'handover_reopen',{id:h.id,expected_version:h.version})).toEqual(reopened);
+  const revisions=(await db.query<any>("select * from public.handover_revisions where handover_id=$1 and action='handover_reopen'",[h.id])).rows;expect(revisions).toHaveLength(1);expect(revisions[0].before_data.finisher_name).toBe('先前完成人');expect(revisions[0].before_data.completed_at).toBe(h.completed_at);expect(revisions[0].after_data.completed_at).toBeNull();
+ });
+ it('驗證更正內容、原因長度及角色，失敗時不變更狀態或紀錄',async()=>{
+  const h=await handover(admin,'handover_create',{id:crypto.randomUUID(),content:'保留原樣'});
+  await expect(handover(staff,'handover_edit',{id:h.id,expected_version:h.version,content:'  '})).rejects.toThrow('2000');await expect(handover(staff,'handover_edit',{id:h.id,expected_version:h.version,content:'更正',reason:'字'.repeat(501)})).rejects.toThrow('500');
+  await expect(handover(outsider,'handover_edit',{id:h.id,expected_version:h.version,content:'越權'})).rejects.toThrow('未授權');
+  expect((await db.query<any>('select version,content from public.handovers where id=$1',[h.id])).rows[0]).toEqual({version:1,content:'保留原樣'});expect((await db.query('select * from public.handover_revisions where handover_id=$1',[h.id])).rows).toHaveLength(1);
  });
 });

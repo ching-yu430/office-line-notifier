@@ -70,3 +70,9 @@ flowchart LR
 訊息 ID UNIQUE 與事件 ID PK 雙重去重。收回正文替換為提示文字；逆序收回透過私有 tombstone 防止原文重新出現。對話事件若時間早於當前綁定會略過，避免換綁後舊事件落入新的教師；收回以原訊息來源比對，即使解除綁定仍能正確撤回舊正文。非文字訊息僅存提示，未下載附件；未來可增加 message_type、media reference 與私有 Storage，必須另設保留期限與讀取政策。
 
 Realtime 僅發布 safe tables，前端依 RLS 讀取並重新載入最新資料；失去連線會顯示提示。最新資料取回限制與分頁待辦明列 README。解除／授權角色變動後，後端即時查表拒絕停用使用者；已呈現的頁面／已下載資料仍需辦公室端裝置管理。
+
+## 交接事項更新
+
+新增 public.handovers，與 teachers／notifications 無強制關聯，保存獨立的交接內容、建立時間／人員姓名快照、完成時間／經辦姓名快照。audit_logs 增加 handover_id 外鍵。authenticated 僅獲 RLS 保護的 SELECT，匿名與未授權使用者不可見；寫入透過 admin-api 認證與 handover_command 再次驗權（SECURITY INVOKER，EXECUTE 僅 service_role）。
+
+建立請求以指定 UUID 去重，完成交易鎖定資料列，已完成者不再改寫經辦。不同當班人員可接手，不會呼叫 LINE API、也不新增訊息。前端訂閱 handovers Realtime。舊通知的 important 歷史欄位保留，展示介面已改用交接事項。

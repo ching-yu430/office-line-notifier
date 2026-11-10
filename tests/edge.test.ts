@@ -19,3 +19,8 @@ describe('Edge HTTP 處理器（依賴 Mock，不連真實服務）',()=>{
  it('LINE 回覆失敗不撤回綁定，保留失敗標記',async()=>{const raw=JSON.stringify({events:[{webhookEventId:'e2',type:'message',source:{type:'user',userId:'Utest'},message:{type:'text',text:'TESTCODE'},replyToken:'test-reply'}]});mocks.rpc.mockResolvedValueOnce({reply:'身分綁定成功'});mocks.line.mockRejectedValueOnce(Error('timeout'));expect((await webhook(await signed(raw))).status).toBe(200);expect(mocks.rpc).toHaveBeenCalledWith('finish_event',{event_id:'e2',outcome:'reply_failed'});});
  it('push 逾時標記結果未明，傳遞同一重試鍵',async()=>{mocks.env.mockImplementation((name:string)=>name==='LINE_SEND_ENABLED'?'true':name==='ALLOWED_ORIGIN'?'http://localhost:5173':'');mocks.rpc.mockResolvedValueOnce(['notice']).mockResolvedValueOnce({to:'Utest',content:'測試通知',retry_key:'fixed-key'}).mockResolvedValueOnce(null);mocks.line.mockRejectedValueOnce(Error('timeout'));expect((await admin(request({action:'send',payload:{}},'valid'))).status).toBe(200);expect(mocks.line).toHaveBeenCalledWith('message/push',{to:'Utest',messages:[{type:'text',text:'測試通知'}]},'fixed-key');expect(mocks.rpc).toHaveBeenCalledWith('finish_delivery',{nid:'notice',outcome:'uncertain',err:'network_or_timeout'});});
 });
+
+it('一般行政建立交接不需開啟 LINE 發送，且只呼叫交接 RPC',async()=>{
+ const response=await admin(request({action:'handover_create',payload:{id:'handover-test',content:'測試交接',created_by:'spoofed'}},'valid'));expect(response.status).toBe(200);
+ expect(mocks.rpc).toHaveBeenCalledWith('handover_command',{actor:'test-user',action:'handover_create',payload:{id:'handover-test',content:'測試交接',created_by:'spoofed'}});expect(mocks.line).not.toHaveBeenCalled();
+});

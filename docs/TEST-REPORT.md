@@ -6,8 +6,8 @@
 
 | 項目 | 結果 | 範圍 |
 | --- | --- | --- |
-| `npm test` | 30 / 30 通過 | 4 項密碼學、16 項 PGlite PostgreSQL、10 項 Edge HTTP mock |
-| `npm run test:e2e` | 4 / 4 通過 | Chromium 桌機完整流程、行政角色限制、390px 手機版、值班工作台快捷通知／重要篩選／領件確認 |
+| `npm test` | 36 / 36 通過 | 4 項密碼學、21 項 PGlite PostgreSQL、11 項 Edge HTTP mock |
+| `npm run test:e2e` | 5 / 5 通過 | Chromium 桌機完整流程、行政角色限制、390px 手機版、值班工作台快捷通知／交接事項／領件確認 |
 | `deno check`（Deno 2.9.6） | 通過 | admin-api 與 line-webhook 的實際 Deno 型別檢查 |
 | `npm run build` | 通過 | TypeScript 前端與測試型別、Vite 正式靜態輸出 |
 | `npm audit --omit=dev --audit-level=high` | 通過，0 vulnerabilities | 當次 npm 公告資料庫中正式依賴 |
@@ -33,3 +33,9 @@ PGlite 執行的是 PostgreSQL 引擎與實際 Migration／RLS／PL/pgSQL，並�
 Edge HTTP 測試以相同 handler 程式執行，但 Auth、Postgres 遠端呼叫、LINE HTTP 回應使用 Mock。瀏覽器測試使用明確標示的 mock 模式。**沒有使用真正 Channel Secret／Access Token、沒有以真實 LINE 帳號驗證簽章與回覆，也沒有驗證實際 Realtime 訊息投遞。**
 
 未執行公開部署、GitHub 推送、LINE 真實通知或遠端資料庫變更。Supabase Advisors 尚未對任何遠端專案執行。正式驗收項目與所需資訊見 README。
+
+## 交接事項驗證
+
+新增 5 項資料庫測試與 1 項 Edge HTTP 測試，涵蓋行政新增／跨人完成、內容驗證、伺服器決定建立人／經辦人、建立去重、重複完成不改寫第一位經辦、未授權／停用拒絕、RLS 與禁止前端直接寫入。驗證交接不建立通知，Edge 不呼叫 LINE，且 LINE_SEND_ENABLED=false 時仍可內部交接。
+
+瀏覽器新增完整交接測試：新增、重新整理保留、切換模擬行政人員、取消完成確認、確認完成、待辦數量減少、完成歷史保存建立人與經辦人，以及通知數量不增加。此為 mock 同一瀏覽器的跨角色測試，真正跨帳號與跨電腦 Realtime 尚待整合驗收。

@@ -7,7 +7,7 @@
 | 項目 | 結果 | 範圍 |
 | --- | --- | --- |
 | `npm test` | 30 / 30 通過 | 4 項密碼學、16 項 PGlite PostgreSQL、10 項 Edge HTTP mock |
-| `npm run test:e2e` | 3 / 3 通過 | Chromium 桌機完整流程、行政角色限制、390px 手機版 |
+| `npm run test:e2e` | 4 / 4 通過 | Chromium 桌機完整流程、行政角色限制、390px 手機版、值班工作台快捷通知／重要篩選／領件確認 |
 | `deno check`（Deno 2.9.6） | 通過 | admin-api 與 line-webhook 的實際 Deno 型別檢查 |
 | `npm run build` | 通過 | TypeScript 前端與測試型別、Vite 正式靜態輸出 |
 | `npm audit --omit=dev --audit-level=high` | 通過，0 vulnerabilities | 當次 npm 公告資料庫中正式依賴 |

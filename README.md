@@ -217,3 +217,7 @@ Repository Settings → Pages → Source 選 GitHub Actions；Settings → Secre
 ## GitHub Pages 分支發布
 
 目前展示頁使用 main 分支根目錄發布。根目錄的 index.html、assets/ 與 .nojekyll 為編譯產物，請勿直接編輯；React 入口是 src/index.html。更新展示版時，先執行 `npm run pages:prepare`，測試後一併提交產物。也可在 Pages 設定改選 GitHub Actions，沿用手動發布工作流程。正式整合前請保持 mock 模式。
+
+## 共同值班介面
+
+介面以行政人員與工讀生共同接手為主：首頁優先呈現老師等回覆、包裹信件待領取與重要待辦，提供包裹／信件／行政聯繫快捷通知。領件確認後保存完成時間及經辦人；訊息中心提供可編輯的常用回覆，送出仍需確認。管理設定對一般行政角色隱藏，教師綁定仍由管理員操作。配色改為奶油黃、米白、暖褐；標誌為依提供圖案製作的網頁向量版本，並非原始圖檔。展示版只在目前瀏覽器保存資料，真正跨帳號共用與同步仍待 Supabase／LINE 整合驗收。

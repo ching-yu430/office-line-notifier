@@ -1,6 +1,6 @@
 import{test,expect}from'@playwright/test';
 test('桌面：綁定、通知、教師回覆與結案',async({page})=>{
- await page.goto('/');await expect(page.getByRole('heading',{name:'每一則通知，都有著落。'})).toBeVisible();
+ await page.goto('/');await expect(page.getByRole('heading',{name:'今天，一起把老師的事處理好。'})).toBeVisible();
  await page.getByRole('button',{name:'教師名單',exact:true}).click();
  const row=page.getByRole('row').filter({hasText:'示範教師乙'});
  await row.getByRole('button',{name:'產生綁定碼'}).click();
@@ -14,4 +14,23 @@ test('桌面：綁定、通知、教師回覆與結案',async({page})=>{
  await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await page.getByLabel('教師篩選').selectOption({label:'示範教師乙'});await page.getByLabel('更新示範教師乙處理狀態').first().selectOption('已完成');await expect(page.getByLabel('更新示範教師乙處理狀態').first()).toHaveValue('已完成');
 });
 test('一般行政無法管理教師或產生綁定碼',async({page})=>{await page.goto('/');await page.getByRole('button',{name:'切換為行政人員'}).click();await page.getByRole('button',{name:'教師名單',exact:true}).click();await expect(page.getByRole('button',{name:'新增教師'})).toHaveCount(0);await expect(page.getByRole('button',{name:'產生綁定碼'})).toHaveCount(0);});
-test('手機：主要頁面可操作且無整頁水平溢出',async({page})=>{await page.setViewportSize({width:390,height:844});await page.goto('/');await expect(page.getByRole('heading',{name:'每一則通知，都有著落。'})).toBeVisible();for(const name of ['教師名單','發送通知','訊息中心','通知紀錄','系統管理']){await page.getByRole('button',{name:name==='訊息中心'?/^訊息中心/:name,exact:name!=='訊息中心'}).click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}});
+test('手機：主要頁面可操作且無整頁水平溢出',async({page})=>{await page.setViewportSize({width:390,height:844});await page.goto('/');await expect(page.getByRole('heading',{name:'今天，一起把老師的事處理好。'})).toBeVisible();expect((await page.locator('nav').boundingBox())!.height).toBeLessThan(100);for(const name of ['教師名單','發送通知','訊息中心','通知紀錄','系統管理']){await page.getByRole('button',{name:name==='訊息中心'?/^訊息中心/:name,exact:name!=='訊息中心'}).click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}});
+test('值班工作台：快捷通知、重要待辦與領件確認',async({page})=>{
+ await page.goto('/');
+ await expect(page.getByRole('img',{name:'NPUST 辦公室標誌'})).toBeVisible();
+ await page.getByRole('button',{name:'信件到了 選老師，通知領取'}).click();
+ await expect(page.locator('textarea')).toHaveValue('您的信件已送達辦公室，請撥空領取。');
+ await page.getByRole('button',{name:'值班工作台',exact:true}).click();
+ await page.getByRole('button',{name:/重要待辦/}).click();
+ await expect(page.getByText('目前只顯示重要待辦')).toBeVisible();
+ await expect(page.locator('tbody')).toContainText('示範教師丙');
+ await expect(page.locator('tbody')).not.toContainText('示範教師甲');
+ await page.getByRole('button',{name:'值班工作台',exact:true}).click();
+ await page.getByRole('button',{name:'登記已領取',exact:true}).first().click();
+ await expect(page.getByRole('dialog')).toContainText('示範教師甲');
+ await page.getByRole('button',{name:'確認已領取',exact:true}).click();
+ await expect(page.getByRole('dialog')).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'登記已領取',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'通知紀錄',exact:true}).click();
+ await expect(page.getByRole('row').filter({hasText:'示範教師甲'})).toContainText('示範管理員');
+});

@@ -213,3 +213,7 @@ Repository Settings → Pages → Source 選 GitHub Actions；Settings → Secre
 - 支援文字收回；若訊息早於收回事件而頁面已呈現，不能保證行政人員未看見。收回後系統替換正文，備份仍依留存政策處理。
 
 完整架構見 [ARCHITECTURE](docs/ARCHITECTURE.md)，備份與錯誤處理見 [OPERATIONS](docs/OPERATIONS.md)。
+
+## GitHub Pages 分支發布
+
+目前展示頁使用 main 分支根目錄發布。根目錄的 index.html、assets/ 與 .nojekyll 為編譯產物，請勿直接編輯；React 入口是 src/index.html。更新展示版時，先執行 `npm run pages:prepare`，測試後一併提交產物。也可在 Pages 設定改選 GitHub Actions，沿用手動發布工作流程。正式整合前請保持 mock 模式。

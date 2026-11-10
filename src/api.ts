@@ -5,7 +5,7 @@ export const client=!mock&&import.meta.env.VITE_SUPABASE_URL&&import.meta.env.VI
 export type Teacher={id:string;name:string;department:string;notes:string;active:boolean;bound_at:string|null;last_notified_at:string|null};
 export type Notice={id:string;teacher_id:string;kind:string;content:string;important:boolean;send_status:string;status:string;created_at:string;sender_id:string;completed_at?:string;completed_by?:string;error_code?:string};
 export type Message={id:string;teacher_id:string;direction:string;content:string;created_at:string;notification_id?:string;withdrawn?:boolean};
-export type Handover={id:string;content:string;created_by:string;creator_name:string;created_at:string;completed_at:string|null;completed_by:string|null;completed_name:string|null};
+export type Handover={id:string;content:string;created_by:string;creator_name:string;handover_name:string;created_at:string;completed_at:string|null;completed_by:string|null;completed_name:string|null;finisher_name:string|null};
 export type Staff={id:string;display_name:string;role:string;active:boolean};
 export type Template={kind:string;label:string;content:string};
 export type Data={teachers:Teacher[];notifications:Notice[];messages:Message[];staff:Staff[];templates:Template[];audit_logs:any[];conversations:any[];handovers:Handover[]};
@@ -15,6 +15,7 @@ const storageKey='office-line-demo-v1';
 let demo:Data=JSON.parse(localStorage.getItem(storageKey)||'null')||structuredClone(defaults);
 demo.conversations ||= [];
 demo.handovers ||= [];
+for(const h of demo.handovers){h.handover_name ??=h.creator_name;h.finisher_name ??=h.completed_name;}
 let demoRole='admin';
 // Volatile only: do not persist plaintext demo codes.
 const codes=new Map<string,{teacher_id:string;expires:number}>();
@@ -45,13 +46,15 @@ export async function command(action:string,payload:any={}):Promise<any>{
  if(action==='complete'){const n=demo.notifications.find(n=>n.id===payload.id);if(n)Object.assign(n,{status:payload.status,completed_at:payload.status==='已完成'?now():null,completed_by:demoRole==='admin'?'demo-admin':'demo-staff'});}
  if(action==='handover_create'){
   const content=String(payload.content||'').trim();if(!content||content.length>2000)throw Error('請輸入 1 至 2000 字的交接內容');
+  const name=String(payload.handover_name||'').trim();if(!name||name.length>80)throw Error('請填寫 1 至 80 字的交接人姓名');
   const actor=demoRole==='admin'?'demo-admin':'demo-staff';const old=demo.handovers.find(h=>h.id===payload.id);
-  if(old){if(old.content!==content||old.created_by!==actor)throw Error('重複請求內容不一致');return {data:old};}
-  const entry:Handover={id:payload.id,content,created_by:actor,creator_name:demo.staff.find(s=>s.id===actor)!.display_name,created_at:now(),completed_at:null,completed_by:null,completed_name:null};demo.handovers.unshift(entry);result={data:entry};
+  if(old){if(old.content!==content||old.created_by!==actor||old.handover_name!==name)throw Error('重複請求內容不一致');return {data:old};}
+  const entry:Handover={id:payload.id,content,created_by:actor,creator_name:demo.staff.find(s=>s.id===actor)!.display_name,handover_name:name,created_at:now(),completed_at:null,completed_by:null,completed_name:null,finisher_name:null};demo.handovers.unshift(entry);result={data:entry};
  }
  if(action==='handover_complete'){
   const h=demo.handovers.find(h=>h.id===payload.id);if(!h)throw Error('交接事項不存在');if(h.completed_at)return {data:h};
-  const actor=demoRole==='admin'?'demo-admin':'demo-staff';Object.assign(h,{completed_at:now(),completed_by:actor,completed_name:demo.staff.find(s=>s.id===actor)!.display_name});result={data:h};
+  const name=String(payload.finisher_name||'').trim();if(!name||name.length>80)throw Error('請填寫 1 至 80 字的完成人姓名');
+  const actor=demoRole==='admin'?'demo-admin':'demo-staff';Object.assign(h,{completed_at:now(),completed_by:actor,completed_name:demo.staff.find(s=>s.id===actor)!.display_name,finisher_name:name});result={data:h};
  }
  if(action==='staff_save'){const s=demo.staff.find(s=>s.id===payload.id);if(s)Object.assign(s,payload);else demo.staff.push(payload);}
  if(action==='template_save'){const x=demo.templates.find(t=>t.kind===payload.kind);if(x)x.content=payload.content;}

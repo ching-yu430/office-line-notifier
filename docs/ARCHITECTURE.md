@@ -76,3 +76,9 @@ Realtime 僅發布 safe tables，前端依 RLS 讀取並重新載入最新資料
 新增 public.handovers，與 teachers／notifications 無強制關聯，保存獨立的交接內容、建立時間／人員姓名快照、完成時間／經辦姓名快照。audit_logs 增加 handover_id 外鍵。authenticated 僅獲 RLS 保護的 SELECT，匿名與未授權使用者不可見；寫入透過 admin-api 認證與 handover_command 再次驗權（SECURITY INVOKER，EXECUTE 僅 service_role）。
 
 建立請求以指定 UUID 去重，完成交易鎖定資料列，已完成者不再改寫經辦。不同當班人員可接手，不會呼叫 LINE API、也不新增訊息。前端訂閱 handovers Realtime。舊通知的 important 歷史欄位保留，展示介面已改用交接事項。
+
+### 手填姓名與歷史列表
+
+新增 handover_name、finisher_name 保存實際填寫的交接人／完成人。原始 created_by、completed_by 與帳號顯示姓名快照仍由驗證後的 actor 產生，供稽核，不能透過輸入姓名改寫帳號歸屬。兩個手填欄位皆有非空白、80 字上限驗證，完成重試維持原姓名與時間不變。
+
+已完成列表移入原生 details／summary，預設收合，依 Asia/Taipei 的完成日期篩選（今日、含今日七天、指定日期），每頁五筆且列表限制高度。未完成事項始終可見。新增 migration 保留舊姓名快照並回填手填姓名欄位，不刪除舊紀錄。

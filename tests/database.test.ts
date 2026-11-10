@@ -8,7 +8,7 @@ const cmd=async(actor:string,action:string,payload:any)=> (await db.query<{v:any
 const teacher=async()=> (await cmd(admin,'teacher_save',{name:'虛構測試教師',department:'測試',notes:''})).teacher_id as string;
 const issue=(t:string,d:string)=>cmd(admin,'issue_code',{teacher_id:t,digest:d});
 const event=async(uid:string,digest:string,extra:any={})=>(await db.query<{v:any}>('select public.line_event($1::jsonb,$2) v',[JSON.stringify({webhookEventId:'e'+(++seq),type:'message',source:{type:'user',userId:uid},message:{id:'m'+seq,type:'text',text:'測試回覆'},...extra}),digest])).rows[0].v;
-beforeAll(async()=>{db=new PGlite();await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;create publication supabase_realtime;insert into auth.users values('${admin}'),('${staff}'),('${outsider}');`);await db.exec(readFileSync('supabase/migrations/20261110023211_office_schema.sql','utf8'));await db.exec(readFileSync('supabase/migrations/20261110062132_handovers.sql','utf8'));await db.exec(`insert into public.staff values('${admin}','測試管理員','admin',true),('${staff}','測試行政','staff',true)`);},30000);
+beforeAll(async()=>{db=new PGlite();await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;create publication supabase_realtime;insert into auth.users values('${admin}'),('${staff}'),('${outsider}');`);await db.exec(readFileSync('supabase/migrations/20261110023211_office_schema.sql','utf8'));await db.exec(readFileSync('supabase/migrations/20261110062132_handovers.sql','utf8'));await db.exec(`insert into public.staff values('${admin}','測試管理員','admin',true),('${staff}','測試行政','staff',true)`);await db.exec(`insert into public.handovers(id,content,created_by,creator_name,completed_at,completed_by,completed_name) values('00000000-0000-4000-8000-000000000051','舊版已完成交接','${admin}','舊建立姓名',now(),'${staff}','舊完成姓名')`);await db.exec(readFileSync('supabase/migrations/20261110064708_handover_names.sql','utf8'));},30000);
 afterAll(async()=>{await db?.close();});
 describe('真實 PostgreSQL 引擎：交易、綁定、權限與通知',()=>{
  it('有效碼成功綁定、用後刪除並留下時間與稽核',async()=>{const t=await teacher();await issue(t,'valid');expect((await event('Uvalid','valid')).reply).toContain('身分綁定成功');expect((await db.query('select * from private.binding_codes where teacher_id=$1',[t])).rows).toHaveLength(0);expect((await db.query<any>('select bound_at from public.teachers where id=$1',[t])).rows[0].bound_at).toBeTruthy();});
@@ -29,7 +29,7 @@ describe('真實 PostgreSQL 引擎：交易、綁定、權限與通知',()=>{
  it('RLS：行政可讀教師；資料表沒有 LINE User ID、碼或雜湊',async()=>{await db.exec(`set role authenticated;set request.jwt.claim.sub='${staff}';`);try{const row=(await db.query<any>('select * from public.teachers limit 1')).rows[0];expect(row).toBeTruthy();expect(row).not.toHaveProperty('line_user_id');expect(row).not.toHaveProperty('digest');expect((await db.query('select * from public.audit_logs')).rows).toHaveLength(0);}finally{await db.exec('reset role');}});
 });
 
-const handover=async(actor:string,action:string,payload:any)=>(await db.query<{v:any}>('select public.handover_command($1,$2,$3::jsonb) v',[actor,action,JSON.stringify(payload)])).rows[0].v;
+const handover=async(actor:string,action:string,payload:any)=>(await db.query<{v:any}>('select public.handover_command($1,$2,$3::jsonb) v',[actor,action,JSON.stringify({handover_name:'測試交接人',finisher_name:'測試完成人',...payload})])).rows[0].v;
 describe('獨立交接事項',()=>{
  it('一般行政可新增交接，不產生通知或訊息；建立人由後端決定',async()=>{
   const before=(await db.query<any>('select count(*)::int n from public.notifications')).rows[0].n;
@@ -60,5 +60,20 @@ describe('獨立交接事項',()=>{
   await db.exec(`set role authenticated;set request.jwt.claim.sub='${staff}';`);
   try{expect((await db.query('select * from public.handovers')).rows.length).toBeGreaterThan(0);await expect(db.query("insert into public.handovers(id,content,created_by,creator_name) values(gen_random_uuid(),'越權',$1,'偽造')",[staff])).rejects.toThrow('permission');await expect(db.query('select public.handover_command($1,$2,$3::jsonb)',[staff,'handover_create','{}'])).rejects.toThrow('permission');}finally{await db.exec('reset role');}
   await db.exec(`set role authenticated;set request.jwt.claim.sub='${outsider}';`);try{expect((await db.query('select * from public.handovers')).rows).toHaveLength(0);}finally{await db.exec('reset role');}
+ });
+});
+
+describe('填寫交接與完成人姓名',()=>{
+ it('保留舊紀錄姓名與帳號，不遺失完成歷史',async()=>{const h=(await db.query<any>("select * from public.handovers where id='00000000-0000-4000-8000-000000000051'")).rows[0];expect(h.handover_name).toBe('舊建立姓名');expect(h.finisher_name).toBe('舊完成姓名');expect(h.completed_by).toBe(staff);});
+ it('手填姓名與實際登入帳號分開保存，完成重試不改寫最後完成人',async()=>{
+  const h=await handover(admin,'handover_create',{id:crypto.randomUUID(),content:'姓名測試',handover_name:'  值班甲  '});expect(h.handover_name).toBe('值班甲');expect(h.created_by).toBe(admin);expect(h.creator_name).toBe('測試管理員');
+  await expect(handover(admin,'handover_create',{id:h.id,content:h.content,handover_name:'其他人'})).rejects.toThrow('不一致');
+  const done=await handover(staff,'handover_complete',{id:h.id,finisher_name:'  完成乙  '});expect(done.finisher_name).toBe('完成乙');expect(done.completed_by).toBe(staff);expect(done.completed_name).toBe('測試行政');expect(await handover(admin,'handover_complete',{id:h.id,finisher_name:'後來丙'})).toEqual(done);
+ });
+ it('交接與完成姓名皆必填，限制 80 字，拒絕空白及缺漏',async()=>{
+  for(const handover_name of ['', '  ', '甲'.repeat(81),null])await expect(handover(admin,'handover_create',{id:crypto.randomUUID(),content:'測試',handover_name})).rejects.toThrow('交接人姓名');
+  const h=await handover(admin,'handover_create',{id:crypto.randomUUID(),content:'等待完成'});
+  for(const finisher_name of ['', '  ', '乙'.repeat(81),null])await expect(handover(staff,'handover_complete',{id:h.id,finisher_name})).rejects.toThrow('完成人姓名');
+  expect((await db.query<any>('select completed_at from public.handovers where id=$1',[h.id])).rows[0].completed_at).toBeNull();
  });
 });

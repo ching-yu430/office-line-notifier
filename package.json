@@ -1,0 +1,33 @@
+{
+  "name": "office-line-notifier",
+  "version": "1.0.0",
+  "description": "學校辦公室 LINE 行政通知、教師身分綁定與雙向訊息系統",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "2.119.0",
+    "lucide-react": "1.70.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "@playwright/test": "1.65.0",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "supabase": "2.90.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.7",
+    "vitest": "5.1.0"
+  }
+}

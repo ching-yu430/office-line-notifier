@@ -17,7 +17,10 @@ test('一般行政無法管理教師或產生綁定碼',async({page})=>{await pa
 test('手機：主要頁面可操作且無整頁水平溢出',async({page})=>{await page.setViewportSize({width:390,height:844});await page.goto('/');await expect(page.getByRole('heading',{name:'值班工作台'})).toBeVisible();expect((await page.locator('nav').boundingBox())!.height).toBeLessThan(100);for(const name of ['教師名單','發送通知','訊息中心','通知紀錄','系統管理']){await page.getByRole('button',{name:name==='訊息中心'?/^訊息中心/:name,exact:name!=='訊息中心'}).click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}});
 test('值班工作台：快捷通知、重要待辦與領件確認',async({page})=>{
  await page.goto('/');
- await expect(page.getByRole('img',{name:'NPUST 辦公室標誌'})).toBeVisible();
+ const logo=page.getByRole('img',{name:'NPUST 辦公室標誌'});
+ await expect(logo).toBeVisible();
+ await expect.poll(()=>logo.evaluate((el:HTMLImageElement)=>el.naturalWidth)).toBe(3302);
+ expect(await logo.evaluate(el=>getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
  await page.getByRole('button',{name:'信件通知'}).click();
  await expect(page.locator('textarea')).toHaveValue('您的信件已送達辦公室，請撥空領取。');
  await page.getByRole('button',{name:'值班工作台',exact:true}).click();

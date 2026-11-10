@@ -12,5 +12,5 @@
 @media(max-width:620px){nav{display:flex;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap}nav button{white-space:nowrap;flex:0 0 auto;min-width:max-content}nav button svg{flex-shrink:0}}
 
 /* 精簡版：保留操作與資料，移除宣傳文字後收整留白。 */
-.office-logo{background:#fff;border-radius:5px;padding:3px}.brand{margin-bottom:30px}.action-buttons{margin-top:0}.daily-actions{padding:20px}.stat strong{margin:10px 0 0}.stat>div{min-height:0}.stat{padding-bottom:20px}.connection{padding-bottom:19px}.page-heading{margin-bottom:22px}
+.office-logo{background:transparent;border-radius:0;padding:0;object-fit:contain;display:block}.brand{margin-bottom:30px}.action-buttons{margin-top:0}.daily-actions{padding:20px}.stat strong{margin:10px 0 0}.stat>div{min-height:0}.stat{padding-bottom:20px}.connection{padding-bottom:19px}.page-heading{margin-bottom:22px}
 @media(max-width:620px){.brand{margin-bottom:0}.daily-actions{padding:15px}.stat{padding-bottom:14px}.stat strong{margin-top:8px}.task-stats .stat>div{min-height:20px}.action-buttons{margin-top:0}}

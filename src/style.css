@@ -15,19 +15,18 @@
 .office-logo{background:transparent;border-radius:0;padding:0;object-fit:contain;display:block}.brand{margin-bottom:30px}.action-buttons{margin-top:0}.daily-actions{padding:20px}.stat strong{margin:10px 0 0}.stat>div{min-height:0}.stat{padding-bottom:20px}.connection{padding-bottom:19px}.page-heading{margin-bottom:22px}
 @media(max-width:620px){.brand{margin-bottom:0}.daily-actions{padding:15px}.stat{padding-bottom:14px}.stat strong{margin-top:8px}.task-stats .stat>div{min-height:20px}.action-buttons{margin-top:0}}
 
-/* 六張卡片：待辦在左、通知在右，桌機按列對齊。 */
-.dashboard-shortcuts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-bottom:26px}
-.dashboard-shortcuts>section{min-width:0}.dashboard-shortcuts>section>h2{font-size:14px;font-weight:500;color:#817358;margin:0 0 12px 2px}
-.dashboard-shortcuts .task-stats,.dashboard-shortcuts .action-buttons{display:grid;grid-template-columns:1fr;gap:10px;margin:0}
-.dashboard-shortcuts .daily-actions{background:none;border:0;padding:0;margin:0;border-radius:0}
-.dashboard-shortcuts .stat,.dashboard-shortcuts .action-buttons>button{display:flex;align-items:center;gap:16px;width:100%;height:78px;min-height:78px;padding:14px 20px;border:1px solid #e7dfcd;border-radius:10px;text-align:left;background:#fffefa}
-.dashboard-shortcuts .stat>div{display:flex;align-items:center;justify-content:flex-start;gap:14px;min-height:0;color:#66583d;font-size:15px}
-.dashboard-shortcuts .stat>div>span{order:2}.dashboard-shortcuts .stat>div>svg{display:block;order:1;padding:9px;width:21px;height:21px;box-sizing:content-box;border-radius:9px;flex-shrink:0}
-.dashboard-shortcuts .stat strong{font-size:26px;line-height:1.3;margin:0 0 0 auto;white-space:nowrap;font-weight:600;color:#51442b}
-.dashboard-shortcuts .stat strong small{font-size:12px;margin-left:6px}.dashboard-shortcuts .card-arrow{color:#a49168;flex-shrink:0}
-.dashboard-shortcuts .action-buttons>button{background:#fcf7e9;border-color:#e6d8b5;gap:14px;color:#8a6c2b}
-.dashboard-shortcuts .action-buttons>button>svg:first-child{display:block;background:#f2e6bd;width:21px;height:21px;padding:9px;border-radius:9px;flex-shrink:0}
-.dashboard-shortcuts .action-buttons>button>svg:last-child{display:block;margin-left:auto;flex-shrink:0}
-.dashboard-shortcuts .action-buttons span{font-size:15px;font-weight:600}.dashboard-shortcuts button:hover{border-color:#c6ab69}
-@media(max-width:1100px){.dashboard-shortcuts{gap:18px}.dashboard-shortcuts .stat,.dashboard-shortcuts .action-buttons>button{padding:14px 16px;gap:10px}.dashboard-shortcuts .stat>div{gap:10px;font-size:14px}.dashboard-shortcuts .action-buttons span{font-size:14px}}
-@media(max-width:760px){.dashboard-shortcuts{grid-template-columns:1fr;gap:22px;margin-bottom:24px}.dashboard-shortcuts .task-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.dashboard-shortcuts .stat{height:92px;min-height:92px;padding:13px 12px;display:block}.dashboard-shortcuts .stat>div{font-size:12px;white-space:nowrap}.dashboard-shortcuts .stat>div>svg,.dashboard-shortcuts .card-arrow{display:none}.dashboard-shortcuts .stat strong{display:block;margin:9px 0 0;font-size:27px}.dashboard-shortcuts .stat strong small{font-size:11px}.dashboard-shortcuts .action-buttons>button{height:68px;min-height:68px;padding:13px 16px}.dashboard-shortcuts .action-buttons span{font-size:15px}.dashboard-shortcuts>section>h2{font-size:13px;margin-bottom:10px}}
+/* 六張卡片：桌機同排等寬，窄螢幕依閱讀順序換行。 */
+.dashboard-shortcuts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:26px}
+.dashboard-shortcuts>.stat,.dashboard-shortcuts>.notice-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:12px;min-width:0;width:100%;height:124px;margin:0;padding:17px 16px;border:1px solid #e7dfcd;border-radius:11px;text-align:left;background:#fffefa}
+.dashboard-shortcuts>.stat>div{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;min-height:0;color:#75684f;font-size:13px;white-space:nowrap}
+.dashboard-shortcuts>.stat>div>svg{display:block;box-sizing:border-box;width:30px;height:30px;padding:6px;border-radius:8px;flex-shrink:0}
+.dashboard-shortcuts>.stat strong{font-size:29px;line-height:1.2;margin:0;color:#51442b;font-weight:600}
+.dashboard-shortcuts>.stat strong small{font-size:12px;margin-left:6px}.dashboard-shortcuts .card-arrow{display:none}
+.dashboard-shortcuts>.notice-card{background:#fcf7e9;border-color:#e6d8b5;color:#8a6c2b}
+.dashboard-shortcuts>.notice-card>svg:first-child{display:block;box-sizing:border-box;background:#f2e6bd;width:34px;height:34px;padding:7px;border-radius:8px;flex-shrink:0}
+.dashboard-shortcuts>.notice-card>svg:last-child{position:absolute;right:14px;top:24px;color:#a48a4e;width:16px;height:16px}
+.dashboard-shortcuts>.notice-card>span{color:#665331;font-size:15px;font-weight:600;white-space:nowrap}
+.dashboard-shortcuts>button:hover{border-color:#c6ab69}
+@media(max-width:1100px){.dashboard-shortcuts{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:620px){.dashboard-shortcuts{gap:9px;margin-bottom:22px}.dashboard-shortcuts>.stat,.dashboard-shortcuts>.notice-card{height:108px;padding:12px 10px;gap:8px;border-radius:9px}.dashboard-shortcuts>.stat>div{font-size:12px}.dashboard-shortcuts>.stat>div>svg{width:26px;height:26px;padding:5px}.dashboard-shortcuts>.stat strong{font-size:27px}.dashboard-shortcuts>.stat strong small{font-size:11px}.dashboard-shortcuts>.notice-card>svg:first-child{width:30px;height:30px;padding:6px}.dashboard-shortcuts>.notice-card>svg:last-child{right:9px;top:18px;width:14px;height:14px}.dashboard-shortcuts>.notice-card>span{font-size:14px}}
+@media(max-width:360px){.dashboard-shortcuts>.stat>div{font-size:11px}.dashboard-shortcuts>.notice-card>span{font-size:13px}}

@@ -1,19 +1,12 @@
-name: 手動核准後發布 GitHub Pages
+# 保留舊展示頁的手動建置能力；正式服務請使用 README 的 Cloudflare Pages 流程。
+name: 手動核准後發布 GitHub 展示版
 on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: 已核對測試與隱私，輸入「確認公開」
+        description: 僅發布虛構資料展示版，輸入「確認公開」
         required: true
         type: string
-      mode:
-        description: 發布模式（整合前請選 mock）
-        required: true
-        default: mock
-        type: choice
-        options:
-          - mock
-          - supabase
 permissions:
   contents: read
   pages: write
@@ -26,19 +19,14 @@ jobs:
     if: inputs.confirmation == '確認公開'
     runs-on: ubuntu-latest
     env:
-      VITE_APP_MODE: ${{ inputs.mode }}
-      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
-      VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/office-line-notifier/' }}
+      VITE_APP_MODE: mock
+      VITE_BASE_PATH: /office-line-notifier/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - name: 檢查公開設定
-        if: inputs.mode == 'supabase'
-        run: node -e "for(const k of ['VITE_SUPABASE_URL','VITE_SUPABASE_PUBLISHABLE_KEY','VITE_BASE_PATH'])if(!process.env[k])throw Error('缺少 '+k)"
       - run: npm ci
       - run: npm test
       - run: npm run build
@@ -53,6 +41,5 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: 發布（請在 environment 設定必要審核者）
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4

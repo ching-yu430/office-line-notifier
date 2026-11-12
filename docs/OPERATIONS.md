@@ -1,73 +1,94 @@
-# 維護與交接
+# 維護、額度、備份與還原
 
-## 日常操作
+## 每日操作
 
-管理員先核對教師本人，再透過可信管道提供綁定碼。綁定完成後確認姓名與時間；若有疑義先停止通知，管理員解除、重新發碼。綁定碼持有即代表可綁該教師，交付管道是必要的人工作業。
+管理員確認「系統管理」資料來源為 Cloudflare D1、後端狀態及 LINE 訊息額度。值班人員先處理待回覆、待領取及待交接；完成後登記狀態與姓名。不同電腦要共用資料，必須連到同一套正式 API／D1，展示模式不會跨電腦同步。
 
-教師停用保留重要歷史，停用時撤銷未使用碼；要移轉 LINE 身分先解除再綁。老師封鎖／解除封鎖官方帳號會更新私有 binding blocked，發送前由後端拒絕封鎖狀態。Webhook 送達有延遲，不能保證即時知道封鎖。
+教師改用 LINE 帳號時，由管理員核實本人，停止該教師通知、解除舊綁定，再透過可信管道提供新碼。不可直接將別人的 LINE User ID 貼入教師資料。綁定碼關閉後不可查回明碼，遺失就重新產生。
 
-## 發送結果
+## 失敗狀態與排查
 
-| 狀態 | 意義 | 建議 |
-| --- | --- | --- |
-| queued／待發送 | 通知已落庫，尚未開始 LINE 請求 | 在紀錄按「處理待發送」，會重新查綁定版本 |
-| sending／傳送中 | 已取得獨佔發送權 | 不重建通知，等待結果 |
-| accepted／API 已接受 | LINE 接受請求 | 不代表收到、已讀或領取；依教師回覆或人工結案 |
-| failed／失敗 | 明確拒絕，例如 HTTP 429、400，或綁定已變更 | 確認額度／綁定及錯誤原因，再由行政人員另建通知 |
-| uncertain／結果未明 | timeout、連線中斷或 5xx，可能已接受 | 先核對，禁止盲目另建通知或直接改 queued |
+- **登入失敗**：帳號每 15 分鐘最多 5 次登入嘗試（包含成功登入），IP 每 15 分鐘最多 30 次。限制到期再試，勿重複連點。帳號不存在與密碼錯誤回相同提示。
+- **Session 失效**：8 小時絕對期限，重新登入；停用／改權限／重設密碼也會立即撤銷 Session。正式環境必須 HTTPS＋`COOKIE_SECURE=true`；不要同時使用 www 與非 www、不同 Pages 預覽網域。
+- **看不到老師回覆**：確認 LINE Use webhook、正確 URL、Channel Secret、Webhook redelivery、老師仍綁定且啟用；檢查頁面輪詢狀態。隱藏分頁不輪詢，回前景後會更新。未綁定身分不保存一般聊天正文。
+- **非文字訊息**：網頁只顯示類型及「文件及附件請使用辦公室 Email 傳送」，不會下載檔案，也不會自動寄 Email。LINE 自身是否保留原附件由 LINE 決定，本系統不做附件保存。
+- **accepted**：LINE API 接受請求，不代表老師已讀、收到或一定能接收；封鎖官方帳號等情況可能不會反映為推播 API 失敗。
+- **queued**：尚未呼叫 LINE，可在通知紀錄逐筆「處理待發送」。同批最多先處理 5 筆，避免一次請求太久或超過 API 限速。
+- **failed**：明確失敗，查看安全錯誤碼（例如 `line_http_401`、`line_http_429`、`binding_changed`）。先修正憑證、額度或教師身分，再由人員核對是否需要新建通知。
+- **uncertain**：網路逾時、5xx 或發送中斷，可能已送出；不要直接重送或改為 queued。先核對 LINE 請求紀錄與行政紀錄，與老師確認後才決定是否建立新的通知。
+- **綁定成功但 LINE 沒有成功回覆**：綁定不會因 reply API 失敗而撤銷。由管理員查看綁定狀態，維護者查 `webhook_events.reply_status`。`reply_failed`／`reply_not_configured`／`reply_skipped_limit` 代表回覆未完成；不能重用已過期的 reply token。重複事件不會再次回覆。
+- **Webhook 500**：資料庫交易未成功或暫時異常，LINE 應重送；若提交後才發生回覆標記故障，重送仍以事件 ID 去重。超過 LINE 的重送期限後，無法保證補回從未寫入資料庫的訊息。
 
-一次處理最多五筆以免函式逾時；100 人作業後需在紀錄繼續處理 queued。此版沒有自動 worker 與背景重試。
+`webhook_events` 沒有原始本文與綁定碼。維護查詢可以只讀彙總，避免輸出 LINE 身分或教師個資：
 
-若 sending 長時間未結束，由 Supabase 專案維護者先確認 Function 已停止、核對 LINE API 請求紀錄與 retry key。可在 SQL Editor 只將明確選定的一筆標為結果未明（先替換實際 UUID）：
-
-```sql
-begin;
-update public.notifications
-set send_status='uncertain', error_code='operator_review_required'
-where id='請替換為實際通知_UUID'::uuid
-  and send_status='sending' and created_at < now()-interval '10 minutes';
-commit;
+```powershell
+npx wrangler d1 execute office-line-notifier --remote --command "SELECT outcome,reply_status,count(*) AS total FROM webhook_events GROUP BY outcome,reply_status;"
 ```
 
-此動作不會重送。要解鎖教師，應先依 LINE 官方當前 Retry Key 文件核對：對**相同 recipient、原始內容、同一 retry_key**重試有時可辨識既有接受請求，但存在有效期間，不應將過期 retry key 當絕對去重保證。本版未提供結果未明自動重送 UI。若校方確認通知結果後需人工修正，請由資料庫維護者限定單筆操作並另外寫 audit_logs，附上工單於學校內部紀錄；不要直接批次改 accepted 或 queued。
+## 密碼與金鑰
 
-429 依 LINE 的 Retry-After（若有）及官方 rate limit 等待；本版不自動重試 429，避免連續消耗額度。到 LINE Official Account Manager 查看每月訊息方案與使用量；push 訊息費用／額度依當時 LINE 方案與地區而異，不在程式中硬編碼「免費幾則」。系統未提供即時 quota 儀表板。使用量監控可擴充 Messaging API 的 consumption／quota 查詢，由後端呼叫。
+本專案採 PBKDF2-SHA256／600,000 次，每帳號 256-bit 隨機鹽，再加獨立 `AUTH_PEPPER` HMAC，已在目前 workerd Runtime 驗證可執行。pepper 與登入限流是額外保護，仍需使用強密碼並完成遠端 CPU 驗收。至少使用 12 字元的個別密碼，不能多人共用同一帳號。不要自行降成本以通過免費 CPU 限制。
 
-## Webhook 異常
+本機 workerd 測試不能證明遠端免費方案 CPU 一定足夠；在測試 Pages 專案檢查登入 CPU 與錯誤率。若密碼計算超出免費方案限制，應評估適當方案或經審核的身分服務，不要無聲改成明碼／單次 SHA256。此版本未引入付費套件或外部登入服務。
 
-- 401：檢查 LINE Channel Secret 與 Webhook 是否來自同一 Channel，不能跳過簽章。
-- 400：本文／事件格式異常；不要將原始內容與 User ID 貼入公開紀錄。
-- 500：資料庫暫時失敗，LINE 啟用 redelivery 後會重送；同事件 ID 只提交一次。
-- reply_failed：資料庫事件已處理，但 LINE 回覆未成功；不回滾綁定，不自動重新消耗 replyToken。管理員看教師 bound_at，必要時透過可信管道說明。
-- 未看到回覆：檢查官方帳號 Use webhook、URL、Realtime publication、Auth staff.active、前端連線提示，以及 Supabase 專案是否暫停。
-- 不記錄 Authorization、LINE 原始 body、Token、完整例外物件或綁定碼。Edge Functions 回應僅保留有限錯誤資訊。
+`AUTH_PEPPER` 必須與建立密碼時一致。遺失後無法還原密碼，只能由受信任維護者重設。輪換此金鑰時必須安排全員重設密碼、刪除既有 Session。`BINDING_PEPPER` 輪換會使目前綁定碼及來源 HMAC 無法匹配，可能影響舊訊息撤回；不要無計畫更換，先安排維護與資料遷移。兩者不能使用 LINE Token 或 Channel Secret 代替。
 
-## 備份與還原
+忘記首位管理員密碼時，受信任維護者可在受控環境，用 `worker/security.ts` 相同演算法產生新雜湊，透過參數化維護工具更新指定帳號並刪除其 Session；勿把明碼貼進 SQL 或終端指令。正常情況由另一位管理員在網頁重設密碼。先保留至少兩位具名管理員能降低鎖死風險。
 
-1. 定義校內保存政策與個資存取權限，至少定期備份 public 與 private schemas；private.bindings 是教師對應的關鍵資料。
-2. Supabase Dashboard 的備份／PITR 功能依方案而異，不能假設免費方案有每日下載備份。查看 [官方備份文件](https://supabase.com/docs/guides/platform/backups)。
-3. 使用 Supabase CLI `db dump --help` 了解目前版本，或在受控維護機使用相容版本 pg_dump，以互動密碼／安全 vault 注入連線。不要把密碼放命令列、終端日誌或 Git。角色與 grants、Migration、Auth 使用者要一起納入還原計畫。
-4. 匯出加密保存在學校授權儲存空間，限制讀取權限；本專案 Git 不保存任何 dump。
-5. 至少每季在獨立、隔離的測試專案演練還原；保持 `LINE_SEND_ENABLED=false`、不要連正式 Webhook，避免還原舊通知後誤送。
-6. 同時還原教師、綁定、notifications、messages、message_sources、events 與 unsent tombstones，避免舊事件重入。備份 snapshot 之後的事件不一定存在；還原後由維護者核對，再決定是否開啟 Webhook。
-7. 保留原始 Pepper 於學校秘密管理工具，才能讓尚未到期碼繼續使用；否則發新碼即可。LINE Token 可輪替，不應包在 SQL dump。
-8. Auth 的帳號／密碼／外部設定與 Storage 物件不是普通 public schema dump 就能完整還原，依官方文件確認各項範圍。
+## 免費方案與流量
 
-## 清理與可用性
+以 [Cloudflare Workers 限制](https://developers.cloudflare.com/workers/platform/limits/)、[D1 用量](https://developers.cloudflare.com/d1/platform/pricing/) 及 [LINE 費用／額度](https://developers.line.biz/en/docs/messaging-api/pricing/) 當期公告為準。免費方案不是無限請求、無限資料庫、無限訊息。
 
-綁定成功立即刪碼；過期雜湊可每天由 SQL 排程清理：
+輪詢每個可見分頁每 15 秒一次，一天持續開啟約 5,760 次 API 請求，8 小時約 1,920 次；多人／多分頁會累加。ETag 可減少下載與完整查詢，不會讓請求數歸零。D1 有讀寫列數及總容量限制，通知／稽核觸發器也會增加寫入列數。靜態資源由 Pages 提供，API 才消耗 Workers 執行。
 
-```sql
-delete from private.binding_codes where expires_at<=now();
-delete from private.rate_limits where window_at<now()-interval '2 days';
+每次發送最多處理 5 人，主動發送每帳號每分鐘 30 個建立請求，全域每分鐘最多 60 筆 dispatch 嘗試。LINE 若回 429 不自動重送。綁定猜測每 LINE 身分每小時 10 次，全域 1,000 次；大量無效綁定可能造成暫時無法綁定，需維護者檢查。
+
+整包 Webhook 用 D1 batch，單一 batch 對 Workers 的 D1 呼叫限制計一次；最多 100 個事件、1 MB 本文。自動 reply 最多 40 次，其餘保留略過狀態；先保存資料再回覆。老師一般文字不需要自動 reply，所以仍能完整存入。
+
+每天查看 Pages／Workers 觀測、D1 用量及 LINE 額度。免費額度耗盡、暫停或服務故障期間，採學校既有電話／Email 備援，不應讓緊急行政事項依賴即時送達保證。
+
+## 備份
+
+依校內個資規範訂保留期限及頻率；備份包括教師個資、LINE 身分、密碼雜湊、對話與操作紀錄，必須加密、限制存取，不得提交 Git 或公開下載。本專案 `.local/`、本機 DB、常見 backup SQL 已忽略；仍應在提交前檢查檔案清單。
+
+手動本機／遠端匯出：
+
+```powershell
+New-Item -ItemType Directory -Force .local | Out-Null
+npx wrangler d1 export office-line-notifier --local --output .local/local-backup.sql
+# 經授權的遠端備份，資料不會印到終端機：
+npx wrangler d1 export office-line-notifier --remote --output .local/office-backup.sql
 ```
 
-Webhook 去重表不可隨意刪除：刪除後舊事件可能再次進入。依 LINE 重送上限與學校保存政策規劃保留期；若需長期歸檔，保留事件 ID 去重能力。收回 tombstone 亦須相同考量。
+將檔案移到學校核准的加密備份位置，並備份對應版本的原始碼／Migration。Secrets 必須另外在安全的密碼管理工具保存，SQL 備份不包含 Cloudflare Secrets。若資料庫與金鑰同時遺失，備份中的帳號可能無法登入。
 
-免費 Supabase 專案可能因閒置暫停；不要把反覆 ping 當成正式維運方案。每天辦公前檢查 Dashboard 狀態；需要穩定服務時評估付費方案及監控。暫停期間 Webhook 可能失敗，超過 LINE 重送窗口就不能保證找回所有訊息。校務緊急事項保留電話／校內信等備援管道。
+## 還原與演練
 
-## 帳號與 Secrets
+先停止該環境主動推播及 Webhook 寫入，再做額外備份；**還原可能覆寫資料，以下遠端操作只能在確認目標及取得核准後執行**。
 
-辦公室個別帳號登入、離職立即停用 staff 並撤銷 Auth sessions，定期複核管理員。不要以 user_metadata 作權限依據。初始管理員由專案管理者建立，網頁禁止修改自己權限。每次敏感操作查當前資料表，不依賴可能陳舊的 JWT 角色。
+優先建立隔離的 D1 還原庫，在設定檔填入實際新 ID，以匯出 SQL 還原到空白資料庫（SQL 本身含 schema，不要先套用相同 Migration）：
 
-LINE Token／Channel Secret／Pepper 只在 Supabase Secrets。更新後依平台要求重新部署 Functions；測試署名與訊息流。Service Role Key 洩漏時立即輪替、稽核存取、檢查綁定與權限異動。前端 bundle 應只有公開 URL 與 publishable key。
+```powershell
+# 名稱與 ID 必須是隔離還原庫，不要指向正式庫。
+npx wrangler d1 create office-line-notifier-restore
+# 建立專用 wrangler.restore.jsonc，沿用格式但改 database_name / database_id。
+npx wrangler d1 execute office-line-notifier-restore --remote --config wrangler.restore.jsonc --file .local/office-backup.sql
+```
+
+外鍵及觸發器可能影響匯入，先在本機空庫演練；若匯出工具不含 Migration 管理表，需與備份版本核對後補記已套用的 Migration，不能再次盲目建立同名表。還原庫不接正式 LINE，不啟用 push，核對帳號、教師、訊息、唯一約束與通知狀態後，再另行核准切換。刪除還原的全部 Session，強制重新登入；核對備份後曾發送的通知，避免還原成 queued 再送一次。
+
+D1 另有 [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)，可用窗口依方案而異。先查看可用 bookmark，核准後才 restore：
+
+```powershell
+npx wrangler d1 time-travel info office-line-notifier
+# 將下列值換成官方回傳的真實 bookmark，這會修改遠端資料庫：
+npx wrangler d1 time-travel restore office-line-notifier --bookmark 實際BOOKMARK
+```
+
+本次沒有執行遠端備份／Time Travel 還原。不要假設備份可用而不演練，也不要把時間回復視為能撤回已經送到 LINE 的訊息。
+
+## 發布與回復版本
+
+GitHub CI 執行測試、Workers 型別檢查及 Pages 編譯，不會部署 Cloudflare。舊 GitHub Pages 手動工作流程只發布展示版。若既有儲存庫啟用了「main 根目錄」Pages，推送 main 的靜態成品仍會觸發舊展示頁更新；正式 Cloudflare 分支應經確認後再推送／綁定。
+
+部署前執行全部測試、備份 D1、檢查 Secrets 不在 `VITE_`／Git／編譯產物。先在隔離測試環境驗證，再由專案擁有者核准正式部署。程式回版不會自動還原 schema；Migration 依前後相容策略前進，重大變更另備回復計畫。

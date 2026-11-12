@@ -1,0 +1,8 @@
+{
+ "$schema": "node_modules/wrangler/config-schema.json",
+ "name": "office-line-notifier",
+ "pages_build_output_dir": "./dist",
+ "compatibility_date": "2026-07-01",
+ "d1_databases": [{"binding":"DB","database_name":"office-line-notifier","database_id":"00000000-0000-0000-0000-000000000000","migrations_dir":"migrations"}],
+ "vars": {"ALLOWED_ORIGIN":"https://請改成正式專案.pages.dev","COOKIE_SECURE":"true","LINE_SEND_ENABLED":"false"}
+}

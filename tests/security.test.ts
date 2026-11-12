@@ -1,5 +1,5 @@
 import{describe,it,expect}from'vitest';
-import{generateCode,hashCode,verifySignature,parseEvents}from'../supabase/functions/_shared/security';
+import{generateCode,hashCode,verifySignature,parseEvents}from'../worker/security';
 describe('綁定碼與 Webhook 安全',()=>{
  it('使用高熵隨機碼，符合 12 字元格式',()=>{const codes=new Set(Array.from({length:1000},generateCode));expect(codes.size).toBe(1000);for(const c of codes)expect(c).toMatch(/^[A-HJ-NP-Z2-9]{12}$/);});
  it('綁定碼正規化，HMAC 依金鑰區分且不包含明碼',async()=>{const digest=await hashCode(' abcd-2345 efgh ','test-pepper');expect(digest).toBe(await hashCode('ABCD2345EFGH','test-pepper'));expect(digest).not.toBe(await hashCode('ABCD2345EFGH','other'));expect(digest).toHaveLength(64);});

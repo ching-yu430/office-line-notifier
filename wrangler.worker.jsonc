@@ -1,0 +1,11 @@
+{
+ "$schema": "node_modules/wrangler/config-schema.json",
+ "name": "office-line-notifier-api",
+ "main": "worker/index.ts",
+ "compatibility_date": "2026-07-01",
+ "workers_dev": true,
+ "d1_databases": [{"binding":"DB","database_name":"office-line-notifier","database_id":"00000000-0000-0000-0000-000000000000","migrations_dir":"migrations"}],
+ "vars": {"ALLOWED_ORIGIN":"http://localhost:5173","COOKIE_SECURE":"false","LINE_SEND_ENABLED":"false"},
+ "triggers": {"crons":["17 2 * * *"]},
+ "observability": {"enabled":false}
+}

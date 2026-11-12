@@ -1,5 +1,0 @@
-project_id = "office-line-notifier"
-[functions.admin-api]
-verify_jwt = false
-[functions.line-webhook]
-verify_jwt = false

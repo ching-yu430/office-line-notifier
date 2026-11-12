@@ -1,0 +1,6 @@
+# 複製為 .dev.vars，僅供本機；正式環境使用 Cloudflare Secrets。
+# npm run setup:local 會產生兩組安全隨機金鑰，不會印出內容。
+AUTH_PEPPER=
+BINDING_PEPPER=
+LINE_CHANNEL_ACCESS_TOKEN=
+LINE_CHANNEL_SECRET=

@@ -1,92 +1,86 @@
-# 架構與開發計畫
+# Cloudflare 架構與資料設計
 
-## 可執行的開發順序
+## 介面保留與資料流
 
-1. 環境盤點，建立獨立 React + Vite 專案，無個資的 mock 資料與六頁操作骨架。
-2. 第一階段：Migration、教師、私有綁定與碼、角色與 RLS、簽章驗證、交易式綁定、稽核；先以 SQL／密碼學測試驗證。
-3. 第二階段：範本與通知資料、去重請求、逐筆 Messaging API push、預覽確認、結果顯示。
-4. 第三階段：接收訊息、事件去重、收回 tombstone、Realtime 訂閱、網頁文字回覆、對話待回覆與完成。
-5. 第四階段：Auth 多人角色、篩選、完成經辦、設定頁、桌機／手機測試、操作文件。所有真實部署與教師通知保留待使用者核准。
-
-本次 1–5 已完成程式及本機驗證；正式雲端整合尚待憑證與測試環境。
-
-## 資料流
+原專案為 React 19＋Vite＋TypeScript，主畫面在 `src/main.tsx`，以狀態切換六個頁面；`RecordHistory`、原始 PNG Logo、暖黃配色及既有操作流程沿用。`src/api.ts` 保留展示模式，正式模式改呼叫同源 `/api`。沒有建立另一套前端。
 
 ```mermaid
 flowchart LR
-  A[行政瀏覽器 React] -->|登入| H[Supabase Auth]
-  A -->|JWT| E[admin-api]
-  E -->|getUser 與 staff 角色| H
-  E -->|service-only RPC| D[(Supabase PostgreSQL)]
-  E -->|push / 私訊| L[LINE Messaging API]
-  T[教師 LINE] --> L
-  L -->|原始本文 HMAC| W[line-webhook]
-  W -->|交易式綁定或訊息寫入| D
-  D -->|RLS + Realtime| A
+ A[行政瀏覽器 React] -->|HTTPS / HttpOnly Cookie / CSRF| P[Cloudflare Pages]
+ P -->|/api/*| W[Workers Runtime]
+ W --> D[(Cloudflare D1)]
+ W -->|Messaging API 純文字 push / reply| L[LINE 官方帳號]
+ L -->|已簽名 Webhook| W
+ A -->|15 秒輪詢 / ETag| W
+ T[老師原本的 LINE] <--> L
 ```
 
-前端只有專案 URL／publishable key。LINE Secrets 與 Supabase Service Role Key 僅在 Functions。LINE User ID、碼雜湊、猜測桶與 Webhook 去重表在不暴露的 private schema；不透過前端或 Realtime 傳送。
+Cloudflare Pages Advanced Mode 的 `_worker.js` 執行相同 Workers 程式，DB Binding 為 `DB`。`_routes.json` 僅讓 API 進入 Runtime，靜態成品由 Pages 提供。未引入額外即時服務、檔案儲存、訊息佇列或付費套件。
 
 ## 資料表
 
-| 表 | 目的 | 前端權限 |
-| --- | --- | --- |
-| public.staff | Auth UID、顯示名稱、管理員／行政、停用 | 讀自己，管理員可讀全員 |
-| public.teachers | 姓名、單位、備註、停用、綁定與最後通知時間 | 有效行政唯讀 |
-| public.notifications | 收件教師、類型、內容、sender、request、retry UUID、綁定版本、發送／業務狀態、完成時間／經辦 | 有效行政唯讀 |
-| public.messages | 內／外文字、教師、通知關聯、LINE message ID、收回旗標 | 有效行政唯讀 |
-| public.conversations | 每教師對話處理狀態、最新收到時間、完成經辦 | 有效行政唯讀 |
-| public.templates | 四種通知範本 | 有效行政唯讀 |
-| public.audit_logs | 操作者、事件、教師、時間；不含碼、Token、訊息正文 | 僅管理員可讀 |
-| private.bindings | teacher PK、LINE user UNIQUE、binding UUID、封鎖狀態 | 無 |
-| private.binding_codes | teacher PK、HMAC UNIQUE、七天到期、產生人 | 無 |
-| private.events | webhookEventId PK、處理時間／結果，不保存原始 body | 無 |
-| private.message_sources | 私有來源對照，授權收回原訊息，即使教師已解除綁定 | 無 |
-| private.unsent_messages | 收回事件 tombstone，處理逆序事件 | 無 |
-| private.rate_limits | 每 LINE user／全局每小時嘗試次數 | 無 |
+| 資料表 | 用途及保護 |
+| --- | --- |
+| admins | 唯一登入帳號、不回傳密碼雜湊；admin／staff、啟用狀態，觸發器阻止最後管理員被降級／停用 |
+| sessions | 32-byte 隨機 Session 僅存 SHA256、CSRF 雜湊及回送 Token、8 小時絕對期限；每次請求連結啟用帳號 |
+| teachers | 教師姓名、單位、備註、啟用、唯一 LINE User ID、綁定時間／事件時間、綁定版本、最後通知時間 |
+| binding_codes | 每位教師一組目前有效碼，唯一 HMAC、7 天到期、使用時間、產碼操作人，不保存明碼 |
+| rate_limits | 原子 UPSERT 計數與視窗到期；帳號／IP／LINE 身分以後端金鑰 HMAC 作為限流鍵 |
+| templates | 四種可編輯通知範本 |
+| send_requests | 發送請求識別碼、操作者及正規化內容指紋，避免相同識別碼被換內容重用 |
+| notifications | 每教師／請求唯一、通知內容、綁定版本、固定 LINE retry key、傳送與業務狀態、完成時間／經辦 |
+| messages | 教師、方向、文字、類型、事件／LINE 訊息唯一 ID、通知關聯、撤回與處理狀態；內部來源 HMAC 不回傳前端 |
+| conversations | 每位教師的待回覆／已完成狀態 |
+| webhook_events | 事件 ID 去重、原始來源身分、事件時間、處理／reply 結果；不保存原始本文、綁定碼或 reply token |
+| unsend_tombstones | 撤回早於原訊息時保留來源／訊息對應，避免重送恢復已撤回文字 |
+| handovers | 交接內容、手填交接人／完成人、實際操作帳號快照、完成時間及版本 |
+| handover_revisions | 修改前後 JSON、原因、實際操作人及版本唯一約束 |
+| internal_notes | 依教師保存辦公室內部備註，與對外訊息表分離 |
+| audit_logs | 操作帳號、動作、時間、結果與關聯識別碼，不存密碼、碼明文或原始 LINE API 回應 |
+| system_meta | 觸發器維護資料版本，供 ETag 輪詢省略未變快照 |
 
-所有表啟用 RLS；前端不能 INSERT／UPDATE／DELETE。僅公開 `office_role()` 受限的 SECURITY DEFINER 成員查詢，固定空 search_path、只讀當前 auth.uid、PUBLIC／anon 不可執行。其他 RPC 使用 SECURITY INVOKER，撤銷 PUBLIC／anon／authenticated 的 EXECUTE，只允許 service_role。service_role 拿到的權限很高，Functions 必須先驗證身分再轉入 SQL；禁止客戶端直接呼叫任意 actor RPC。
+D1 是 SQLite，沒有瀏覽器直連或 PostgreSQL RLS。**唯一對外資料入口是 Workers**，所有參數化 SQL 執行前都有 Session／有效帳號／角色驗證；Webhook 入口獨立驗證 LINE 原始本文簽章。D1 Console／API 憑證本身是維護者權限，不可交給行政瀏覽器。
 
-### 綁定交易
+## Session 與權限
 
-- Web Crypto CSPRNG 產生 12 個無混淆字元，字母表 32 字元，60 bits 熵；不是姓名／學號的編碼。
-- 以後端 Pepper 作 HMAC-SHA256，資料庫只存 digest，明碼僅回傳管理員一次且不記錄日誌。傳送採 HTTPS。重發碼取代舊碼。
-- `line_event` 以 webhookEventId 去重，持有交易 advisory lock，查七天有效碼，鎖定教師、確認 active、插入唯一綁定、更新時間、刪碼與寫稽核一併提交。
-- LINE User ID UNIQUE、teacher PK 保護併發；解除／發碼也使用相同 advisory lock。已綁定 LINE 輸入其他碼會當一般文字，不會任意換綁。
-- 每 LINE 帳號每小時最多 10 次未綁定訊息嘗試；全系統每小時最多 1000 次。無效碼／過期碼同樣回覆，避免公開探測教師狀態。
-- 成功提交後才用一次性 replyToken 回覆；回覆 LINE 失敗不會撤回已成功的身分綁定，也不再次消耗碼。事件標記 reply_failed 供後台維護核對。管理員可查看 bound_at；教師再傳文字會進入對話。
+密碼先以獨立 `AUTH_PEPPER` 做 HMAC，再以每帳號隨機鹽進行 PBKDF2-SHA256／600,000 次。雜湊包含演算法版本／成本／鹽，支援後續遷移。目前 workerd Runtime 已驗證可執行此成本；正式免費方案 CPU 驗收見維運文件。沒有前端硬編碼密碼，也沒有自助註冊或預設管理員密碼。
 
-### 發送交易與可靠性
+Session Cookie 在正式環境為 `__Host-office_session; Path=/; Secure; HttpOnly; SameSite=Lax`，本機 HTTP 才使用非 Secure 的 `office_session`。Session ID 不存 localStorage，不回傳 JSON；瀏覽器只持有 Cookie 和記憶體中的 CSRF Token。所有變更均須正確 Origin、JSON 格式及 CSRF；登入也須 Origin，且有登入失敗限制。僅設定單一允許來源，不使用 `*`。
 
-- 後端雙重驗權，建立通知前全批確認 active、唯一綁定且未封鎖；任何一人不可發送則整批 rollback。
-- `request_id + teacher_id` UNIQUE 保護同一次確認重複請求；相同 request 不接受不同內容／寄件人。新的確認視窗會產生新的 request，因此行政人員仍需避免重建相同通知。
-- `claim_delivery` 使用 row lock，一次只能領取 queued；記錄綁定版本，領取前比對可避免解除／換綁後寄到舊帳號。傳送中或結果未明時，禁止教師編輯／停用／解除，以免變更身分時外部推播仍在途中。
-- 每筆有固定 `X-Line-Retry-Key`，避免同一 API 請求在 LINE 端重複接受。只在 2xx 或有 accepted-request-id 的 409 視為 API 接受；不代表送達／已讀。
-- 4xx 記為 failed；5xx、timeout、網路異常為 uncertain。Functions 中途消失可能留下 sending；維護者核對，不自動重送。
-- 一次立即執行最多 5 筆，其餘 queued 可由紀錄處理；正式大量作業應改用 durable queue。資料庫先保存通知，不因 LINE 出錯遺失紀錄。
+一般行政能讀教師的可用資料並發送／回覆、更新狀態、處理交接與內部備註；不能新增教師／變更綁定／管理帳號或範本。操作紀錄僅管理員讀取；全員顯示名稱用來標示經辦人，行政人員不會取得其他人的登入帳號。停用／改密碼／改權限會刪除該帳號所有 Session，自己不得停用或降級自己。
 
-### 收回、附件與 Realtime
+## 原子綁定與 Webhook
 
-訊息 ID UNIQUE 與事件 ID PK 雙重去重。收回正文替換為提示文字；逆序收回透過私有 tombstone 防止原文重新出現。對話事件若時間早於當前綁定會略過，避免換綁後舊事件落入新的教師；收回以原訊息來源比對，即使解除綁定仍能正確撤回舊正文。非文字訊息僅存提示，未下載附件；未來可增加 message_type、media reference 與私有 Storage，必須另設保留期限與讀取政策。
+Workers 先驗證原始位元組對應的 LINE HMAC-SHA256，再解析大小受限的 JSON。文字碼正規化為大寫並去除空格／連字號，以 `BINDING_PEPPER` 產生 HMAC；不把碼寫入事件或紀錄。
 
-Realtime 僅發布 safe tables，前端依 RLS 讀取並重新載入最新資料；失去連線會顯示提示。最新資料取回限制與分頁待辦明列 README。解除／授權角色變動後，後端即時查表拒絕停用使用者；已呈現的頁面／已下載資料仍需辦公室端裝置管理。
+整包 Webhook 的 SQL 放進 D1 `batch()` 原子交易。每事件以事件 ID＋本次隨機 claim 判斷是否由本次新增，所有副作用都受此條件限制。綁定必須同時符合：教師啟用、尚未綁定、碼未用且未過期、事件不早於產碼、此 LINE 身分未綁其他人、身分及全域嘗試次數未超限。綁定、碼失效、稽核在同一交易內完成；唯一約束再阻擋並行重複綁定。
 
-## 交接事項更新
+原始綁定事件不當作普通聊天保存。已綁帳號若再次傳送碼格式文字，記錄遮蔽提示，不保存碼明文。普通文字僅關聯當時綁定且事件時間不早於本次綁定的教師；已停用／未綁定身分不保存普通聊天正文。
 
-新增 public.handovers，與 teachers／notifications 無強制關聯，保存獨立的交接內容、建立時間／人員姓名快照、完成時間／經辦姓名快照。audit_logs 增加 handover_id 外鍵。authenticated 僅獲 RLS 保護的 SELECT，匿名與未授權使用者不可見；寫入透過 admin-api 認證與 handover_command 再次驗權（SECURITY INVOKER，EXECUTE 僅 service_role）。
+訊息撤回以原訊息來源 HMAC 判斷，避免換綁後撤回到別人。若先收到撤回，先建立墓碑；後到訊息正文直接保存撤回提示。圖片等非文字只記錄類型與 Email 提示。群組／聊天室來源不參與教師私訊或綁定。
 
-建立請求以指定 UUID 去重，完成交易鎖定資料列，已完成者不再改寫經辦。不同當班人員可接手，不會呼叫 LINE API、也不新增訊息。前端訂閱 handovers Realtime。舊通知的 important 歷史欄位保留，展示介面已改用交接事項。
+資料庫成功提交後才呼叫 reply API。reply 失敗不撤銷已完成的綁定，事件保存失敗標記；重送不重複回覆。一次最多 40 個自動 reply，優先綁定成功，保留其餘略過狀態以符合免費呼叫上限。D1 交易失敗回 500 讓 LINE 重送；若 LINE 超過重送期限仍未成功，不能保證日後取回未寫入的訊息。
 
-### 手填姓名與歷史列表
+## 通知與聊天
 
-新增 handover_name、finisher_name 保存實際填寫的交接人／完成人。原始 created_by、completed_by 與帳號顯示姓名快照仍由驗證後的 actor 產生，供稽核，不能透過輸入姓名改寫帳號歸屬。兩個手填欄位皆有非空白、80 字上限驗證，完成重試維持原姓名與時間不變。
+每批最多 100 位，用 JSON 參數一次建立個別通知。資料庫觸發器會檢查每位教師當下啟用且有相同綁定版本；任何一位不符合即全批回滾，不會送出部分錯誤對象。相同請求只能重用同一操作者／同一內容指紋。
 
-已完成列表移入原生 details／summary，預設收合，依 Asia/Taipei 的完成日期篩選（今日、含今日七天、指定日期），每頁五筆且列表限制高度。未完成事項始終可見。新增 migration 保留舊姓名快照並回填手填姓名欄位，不刪除舊紀錄。
+原子 `UPDATE ... RETURNING` 只允許一個執行者把 queued 變成 sending；呼叫 LINE 前重查教師及綁定版本。HTTP 成功或 LINE 可辨認的 retry-key 409 記 accepted，4xx 記 failed，5xx／連線逾時記 uncertain。超過兩分鐘未完成的 sending 在讀取快照／下一次發送時轉 uncertain，不自動重送。只有 accepted 才新增對外聊天紀錄，並保留通知關聯與操作人。
 
-### 內部備註與交接版本
+解除綁定無法撤回已交給 LINE 的請求；操作人應停止該教師通知後再核對身分。任何網路系統皆無法將資料庫交易與外部 LINE API 變成同一個原子交易，因此不可宣稱「絕不重複」或「API 成功即教師收到」。
 
-internal_notes 使用獨立 teacher_id 與作者帳號／姓名快照，與 LINE messages 分開。internal_note_command 驗證有效行政角色、教師 active、長度及 UUID 去重，交易式新增備註與 audit_logs 關聯；Edge 將此操作獨立路由到該 RPC，不經過 LINE 發送分支。
+快照有最近筆數限制，資料持續保存在 D1；日期／教師／狀態篩選目前在已載入資料上執行。內部備註和交接流程不呼叫 LINE。交接使用版本比對及原子批次快照，舊版本操作回 409，不覆寫其他人的更正。
 
-handovers 增加整數 version；handover_edit／handover_reopen 必須帶 expected_version，資料列 FOR UPDATE 後比較版本，不一致時拒絕。更正、完成與恢復會增加版本；恢復清空目前的完成欄位，但同交易寫入 handover_revisions 的 before_data／after_data，保留原完成帳號、姓名與時間。更正手填姓名不更動帳號歸屬。版本快照只新增、前端無修改／刪除權限。
+## API
 
-新表皆 RLS + 明確 SELECT grant，只允許有效行政讀取；寫入 RPC 皆 SECURITY INVOKER、空 search_path、撤銷 PUBLIC／anon／authenticated EXECUTE，只授權 service_role。後端再次驗證 actor，不信任傳入作者欄位。備註與版本表均加入 Realtime，僅辦公室端 Auth 使用者可讀。
+| 方法與路徑 | 驗證／功能 |
+| --- | --- |
+| GET /api/health | 無敏感資訊的服務辨識 |
+| POST /api/login | Origin、登入限流、密碼驗證，建立 Cookie |
+| GET /api/session | Session，回傳目前帳號及 CSRF Token |
+| POST /api/logout | Session＋CSRF，撤銷目前 Session |
+| GET /api/data | Session，經權限過濾的快照；If-None-Match 支援 304 |
+| POST /api/command | Session＋CSRF＋角色，`{action,payload}` 對應既有操作 |
+| POST /api/line/webhook | LINE 原始本文簽章，免行政 Session；只有此路徑免 Origin／CSRF |
+
+所有 API 錯誤為繁體中文 JSON；不輸出 SQL、參數、Token 或 LINE 原始錯誤。Schema 後續調整新增 Migration，不改寫已套用的正式 Migration。

@@ -1,3 +1,4 @@
+import{productionCryptoLimit}from'../production-crypto';
 import{test,expect}from'@playwright/test';
 import{Miniflare}from'miniflare';
 import{build}from'esbuild';
@@ -11,7 +12,7 @@ const username='browser-'+randomUUID(),password=randomBytes(24).toString('hex'),
 let lineCalls:any[]=[];
 test.beforeAll(async()=>{
  const built=await build({entryPoints:['worker/index.ts'],bundle:true,format:'esm',platform:'browser',write:false});
- mf=new Miniflare({modules:true,script:built.outputFiles[0].text,compatibilityDate:'2026-07-01',d1Databases:['DB'],bindings:{ALLOWED_ORIGIN:origin,COOKIE_SECURE:'false',AUTH_PEPPER:authPepper,BINDING_PEPPER:bindingPepper,LINE_CHANNEL_SECRET:lineSecret,LINE_CHANNEL_ACCESS_TOKEN:randomBytes(32).toString('hex'),LINE_SEND_ENABLED:'true'},outboundService:async(req:any)=>{lineCalls.push(await req.json());return new Response('{}');}});
+ mf=new Miniflare({modules:true,script:productionCryptoLimit+built.outputFiles[0].text,compatibilityDate:'2026-07-01',d1Databases:['DB'],bindings:{ALLOWED_ORIGIN:origin,COOKIE_SECURE:'false',AUTH_PEPPER:authPepper,BINDING_PEPPER:bindingPepper,LINE_CHANNEL_SECRET:lineSecret,LINE_CHANNEL_ACCESS_TOKEN:randomBytes(32).toString('hex'),LINE_SEND_ENABLED:'true'},outboundService:async(req:any)=>{lineCalls.push(await req.json());return new Response('{}');}});
  const db=await mf.getD1Database('DB');const sql=readFileSync('migrations/0001_initial.sql','utf8').replace(/--[^\n]*/g,'');await db.batch(sql.split(/;\s*(?=(?:CREATE|INSERT|ALTER|PRAGMA|$))/g).map(s=>s.trim()).filter(Boolean).map(sql=>db.prepare(sql)));
  const now=new Date().toISOString();await db.prepare('INSERT INTO admins VALUES(?,?,?,?,?,?,?,?)').bind('browser-admin',username,'瀏覽器測試管理員',await passwordHash(password,authPepper),'admin',1,now,now).run();
  vite=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','localhost','--port','5174','--strictPort'],{env:{...process.env,VITE_APP_MODE:'cloudflare',VITE_API_BASE:'/api',VITE_BASE_PATH:'/'},stdio:'ignore'});

@@ -4,6 +4,7 @@ import{limitedBody}from'./security';
 import{command}from'./commands';
 import{webhook}from'./webhook';
 import{recover}from'./line';
+import{operationalFailure}from'./errors';
 const securityHeaders={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 export default {
  async fetch(req:Request,env:Env):Promise<Response>{
@@ -22,7 +23,7 @@ export default {
   try{
    if(env.COOKIE_SECURE==='false'&&!['localhost','127.0.0.1','[::1]'].includes(url.hostname))throw new HttpError(503,'公開服務必須啟用安全 Cookie 設定');
    if(path==='/api/line/webhook'){
-    try{return await webhook(req,env);}catch(e){if(e instanceof HttpError)return json({error:e.message},e.status);return json({error:'暫時無法處理，請 LINE 重送'},500);}
+    try{return await webhook(req,env);}catch(e){if(e instanceof HttpError)return json({error:e.message,...(e.code?{code:e.code}:{})},e.status);return json({error:'暫時無法處理，請 LINE 重送'},500);}
    }
    if(origin&&origin!==allowed)throw new HttpError(403,'來源不允許');
    if(req.method==='OPTIONS')return new Response(null,{status:204,headers});
@@ -69,13 +70,14 @@ export default {
    }
    throw new HttpError(404,'找不到 API');
   }catch(e){
-   if(e instanceof HttpError)return json({error:e.message},e.status);
+   if(e instanceof HttpError)return json({error:e.message,...(e.code?{code:e.code}:{})},e.status);
    // 不輸出 SQL、參數、密碼或 LINE 原始錯誤內容。
    const message=e instanceof Error?e.message:'';
    if(message.includes('last_admin'))return json({error:'必須保留至少一位啟用中的管理員'},409);
    if(message.includes('invalid_binding'))return json({error:'教師尚未綁定、已停用或綁定已變更'},409);
    if(message.includes('UNIQUE constraint'))return json({error:'帳號或資料已存在，請重新確認'},409);
-   return json({error:'操作失敗，請稍後重試或聯絡管理員'},500);
+   const operational=operationalFailure(e);if(operational)return json({error:operational.message,code:operational.code},503);
+   return json({error:'操作失敗，請稍後重試或聯絡管理員',code:'INTERNAL_ERROR'},500);
   }
  },
  async scheduled(_event:ScheduledEvent,env:Env,ctx:ExecutionContext){ctx.waitUntil(env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(unix()),env.DB.prepare('DELETE FROM rate_limits WHERE expires_at<=?').bind(unix())]).then(()=>recover(env.DB)));}

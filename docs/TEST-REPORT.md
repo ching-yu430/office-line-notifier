@@ -1,12 +1,14 @@
 # 測試報告：Workers＋D1 版本
 
-測試日期：2026 年 11 月 12 日（台灣）。測試皆在本機開發環境執行，沒有部署正式服務、使用真實 LINE 憑證或發送教師通知。
+測試日期：2026 年 11 月 13 日（台灣）。測試在本機開發環境執行，另對已上線網站進行一次不存在的隨機帳號登入測試與一次無效 Session 查詢，沒有使用真實管理員密碼、LINE 憑證或發送教師通知。
+
+線上觀察：首頁／health 正常，無效 Session 回 401 且成功經過 D1 查詢；登入回 500。程式含超過正式 PBKDF2 上限的成本，已完成相容修正與本機回歸。新版尚需由儲存庫擁有者上傳、更新舊帳號雜湊後再驗收，不能宣稱線上登入已修好。
 
 ## 結果
 
 | 檢查 | 結果 |
 | --- | --- |
-| `npm test` | **37 項通過**：27 項 Workers／D1 HTTP 整合、4 項密碼學／事件格式、6 項台灣日期篩選 |
+| `npm test` | **44 項通過**：30 項 Workers／D1 HTTP 整合、4 項密碼與維護相容性、4 項密碼學／事件格式、6 項台灣日期篩選 |
 | `npm run test:e2e` | **10 項通過**：原有 9 項流程及版面，加上正式模式 Cookie／Webhook／輪詢流程 |
 | `npm run build:cloudflare` | 前端與 Workers 型別檢查、Vite、Pages `_worker.js` 打包通過 |
 | Wrangler Worker dry run | 本機打包與 D1 Binding 辨識通過，沒有上傳 |
@@ -21,7 +23,9 @@ Vite 編譯時 lucide-react 的 `use client` 會產生兩則非阻擋警告；�
 ## 已覆蓋
 
 - 實際 Miniflare／workerd 執行 Workers HTTP 與 SQLite／D1 Migration，未以陣列取代正式資料表。所有 LINE 外部 HTTP 由 Mock 攔截。
-- 密碼 PBKDF2-SHA256 600,000 次及獨立 pepper 已在真實本機 workerd Runtime 驗證。
+- PBKDF2-SHA256 100,000 次及獨立 pepper；Workers HTTP 與瀏覽器整合明確加上正式服務的 PBKDF2 上限模擬，不再以本機能算 600,000 次推論線上可用。
+- 舊 600,000 次紀錄回一致的維護提示；維護修復後原帳號 ID、角色與教師資料不變，舊 Session 撤銷，可重新登入。
+- 缺少資料表時回安全的分類訊息；原始 SQL、密碼與金鑰不回傳。
 - Session Cookie、HttpOnly／SameSite、CSRF、來源驗證、登出、Session 到期、停用、密碼雜湊、登入嘗試限制、無效 Session 拒絕讀取。公開網域拒絕使用本機非 Secure Cookie 設定。
 - 管理員／一般行政後端權限、新增／停用帳號、撤銷 Session、自己及最後管理員降級保護、快照欄位隱私。
 - 12 字元高熵碼、HMAC 正規化、七天期限、到期／已用／重發／停用／解除後失效、同碼併發提交、LINE 身分唯一、每身分及全域猜測限制。
@@ -39,7 +43,7 @@ Vite 編譯時 lucide-react 的 `use client` 會產生兩則非阻擋警告；�
 
 ## 尚未驗證
 
-- 真正 Cloudflare 帳號、D1 ID、Pages／Worker 公開部署、正式 Secrets 與管理員。
+- 目前已有使用者建立的 Pages 網址與 D1；修正後的真實管理員登入、Secrets 值一致性及雜湊更新仍待使用者驗收。
 - 真實 LINE Verify、官方帳號身分綁定及回覆、push 額度、封鎖／取消好友、Webhook redelivery、真實附件與撤回事件。
 - 免費方案實際 CPU（包含密碼計算）、流量、讀寫列數、正式多人壓力及網路異常。
 - 正式個資備份、Secrets 保管、遠端 Time Travel 與災難還原。

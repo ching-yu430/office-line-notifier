@@ -43,7 +43,7 @@ D1 是 SQLite，沒有瀏覽器直連或 PostgreSQL RLS。**唯一對外資料�
 
 ## Session 與權限
 
-密碼先以獨立 `AUTH_PEPPER` 做 HMAC，再以每帳號隨機鹽進行 PBKDF2-SHA256／600,000 次。雜湊包含演算法版本／成本／鹽，支援後續遷移。目前 workerd Runtime 已驗證可執行此成本；正式免費方案 CPU 驗收見維運文件。沒有前端硬編碼密碼，也沒有自助註冊或預設管理員密碼。
+密碼先以獨立 `AUTH_PEPPER` 做 HMAC，再以每帳號隨機鹽進行 PBKDF2-SHA256／100,000 次。雜湊包含演算法版本／成本／鹽，支援後續遷移。Cloudflare 正式服務對單次 PBKDF2 有 100,000 次上限，本機 workerd 不一定實施此限制。此成本低於一般 OWASP 的 600,000 次建議，不宣稱保護程度相同；獨立 pepper、強密碼及限流仍必須保留。舊 600,000 次紀錄需由持有原始金鑰的維護者重新產生雜湊，不能只改紀錄中的次數。沒有前端硬編碼密碼，也沒有自助註冊或預設管理員密碼。
 
 Session Cookie 在正式環境為 `__Host-office_session; Path=/; Secure; HttpOnly; SameSite=Lax`，本機 HTTP 才使用非 Secure 的 `office_session`。Session ID 不存 localStorage，不回傳 JSON；瀏覽器只持有 Cookie 和記憶體中的 CSRF Token。所有變更均須正確 Origin、JSON 格式及 CSRF；登入也須 Origin，且有登入失敗限制。僅設定單一允許來源，不使用 `*`。
 

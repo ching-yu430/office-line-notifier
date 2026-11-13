@@ -1,3 +1,4 @@
+import type{D1Database,D1PreparedStatement,Fetcher}from'@cloudflare/workers-types';
 export interface Env {
  DB:D1Database; ASSETS?:Fetcher;
  ALLOWED_ORIGIN:string; COOKIE_SECURE?:string; LINE_SEND_ENABLED?:string;
@@ -5,7 +6,7 @@ export interface Env {
  LINE_CHANNEL_SECRET?:string; LINE_CHANNEL_ACCESS_TOKEN?:string;
 }
 export type Actor={id:string;username:string;display_name:string;role:'admin'|'staff';active:number};
-export class HttpError extends Error {constructor(public status:number,message:string){super(message);}}
+export class HttpError extends Error {constructor(public status:number,message:string,public code?:string){super(message);}}
 export const iso=()=>new Date().toISOString();
 export const unix=()=>Math.floor(Date.now()/1000);
 export function text(v:unknown,label:string,max=5000,min=1):string{if(typeof v!=='string'||v.trim().length<min||v.trim().length>max)throw new HttpError(400,`${label}請填寫 ${min} 至 ${max} 字`);return v.trim();}

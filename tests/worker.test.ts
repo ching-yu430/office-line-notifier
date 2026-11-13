@@ -1,3 +1,4 @@
+import{productionCryptoLimit}from'./production-crypto';
 import type{D1Database}from'@cloudflare/workers-types';
 import{beforeAll,beforeEach,afterAll,it,expect,describe}from'vitest';
 import{Miniflare}from'miniflare';
@@ -13,7 +14,7 @@ let calls:{url:string;body:any;retry:string|null}[]=[],lineStatus=200,lineThrows
 const now=()=>new Date(Date.now()+timeOffset).toISOString();
 beforeAll(async()=>{
  const output=await build({entryPoints:['worker/index.ts'],bundle:true,format:'esm',platform:'browser',write:false});
- mf=new Miniflare({modules:true,script:output.outputFiles[0].text,compatibilityDate:'2026-07-01',d1Databases:['DB'],bindings:{ALLOWED_ORIGIN:origin,COOKIE_SECURE:'false',AUTH_PEPPER:authPepper,BINDING_PEPPER:bindingPepper,LINE_CHANNEL_SECRET:lineSecret,LINE_CHANNEL_ACCESS_TOKEN:randomBytes(32).toString('hex'),LINE_SEND_ENABLED:'true'},outboundService:async(req:any)=>{
+ mf=new Miniflare({modules:true,script:productionCryptoLimit+output.outputFiles[0].text,compatibilityDate:'2026-07-01',d1Databases:['DB'],bindings:{ALLOWED_ORIGIN:origin,COOKIE_SECURE:'false',AUTH_PEPPER:authPepper,BINDING_PEPPER:bindingPepper,LINE_CHANNEL_SECRET:lineSecret,LINE_CHANNEL_ACCESS_TOKEN:randomBytes(32).toString('hex'),LINE_SEND_ENABLED:'true'},outboundService:async(req:any)=>{
   calls.push({url:req.url,body:await req.json(),retry:req.headers.get('x-line-retry-key')});if(lineThrows)throw Error('simulated transport failure');return new Response('{}',{status:lineStatus});
  }});
  db=await mf.getD1Database('DB') as unknown as D1Database;
@@ -176,4 +177,20 @@ it('D1 交易異常回 500 不洩漏 SQL，整包回滾後可用同事件重送'
  await db.prepare("CREATE TRIGGER simulate_failure BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'private_sql_debug'); END").run();
  try{const response=await hook([incoming]);expect(response.status).toBe(500);expect(await response.text()).not.toContain('private_sql_debug');expect((await get('SELECT count(*) AS n FROM webhook_events')).n).toBe(0);expect((await get('SELECT count(*) AS n FROM messages')).n).toBe(0);}finally{await db.prepare('DROP TRIGGER simulate_failure').run();}
  expect((await hook([incoming])).status).toBe(200);expect((await get('SELECT count(*) AS n FROM messages')).n).toBe(1);
+});
+it('舊密碼格式對所有帳號回相同維護提示，避免 500 及帳號存在資訊差異',async()=>{
+ await db.prepare("UPDATE admins SET password_hash=replace(password_hash,'$100000$','$600000$') WHERE id='test-admin'").run();
+ const known=await request('/login',credentials,'',''),unknown=await request('/login',{username:'unknown-'+randomUUID(),password:randomBytes(24).toString('hex')},'','');
+ expect(known.status).toBe(503);expect(unknown.status).toBe(503);expect(await known.json()).toEqual(await unknown.json());
+});
+it('維護修復保留原帳號與教師，撤銷 Session 並恢復登入',async()=>{
+ const {passwordRepairSql}=await import('../scripts/admin-password.mjs');const tid=await teacher(true),before=await get('SELECT id,username,role,active FROM admins WHERE id=?','test-admin');
+ await db.prepare("UPDATE admins SET password_hash=replace(password_hash,'$100000$','$600000$') WHERE id='test-admin'").run();
+ const sql=passwordRepairSql(credentials.username,credentials.password,authPepper).replace(/--[^\n]*/g,'');await db.batch(sql.split(';').map(s=>s.trim()).filter(Boolean).map(s=>db.prepare(s)));
+ expect(await get('SELECT id,username,role,active FROM admins WHERE id=?','test-admin')).toEqual(before);expect((await get('SELECT id FROM teachers WHERE id=?',tid)).id).toBe(tid);
+ expect((await request('/session')).status).toBe(401);expect((await get("SELECT count(*) AS n FROM audit_logs WHERE action='password_repair'")).n).toBe(1);const repaired=await login();expect((await request('/session',undefined,repaired.cookie,repaired.csrf)).status).toBe(200);
+});
+it('資料庫未套用完整結構時回安全的明確提示，不洩漏 SQL',async()=>{
+ await db.prepare('ALTER TABLE rate_limits RENAME TO temporary_rate_limits').run();
+ try{const response=await request('/login',credentials,'','');expect(response.status).toBe(503);const body:any=await response.json();expect(body.code).toBe('DATABASE_SCHEMA_MISSING');expect(JSON.stringify(body)).not.toContain('SELECT');}finally{await db.prepare('ALTER TABLE temporary_rate_limits RENAME TO rate_limits').run();}
 });

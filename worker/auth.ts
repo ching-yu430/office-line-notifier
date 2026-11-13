@@ -1,5 +1,5 @@
 import{type Env,type Actor,HttpError,unix,iso,text,audit}from'./types';
-import{sha256,randomToken,passwordHash,passwordValid,equal,hashCode}from'./security';
+import{sha256,randomToken,passwordHash,passwordValid,equal,hashCode,isPasswordHashSupported}from'./security';
 export const cookieName=(env:Env)=>env.COOKIE_SECURE==='false'?'office_session':'__Host-office_session';
 export function cookie(value:string,env:Env,age=8*3600){return `${cookieName(env)}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${env.COOKIE_SECURE==='false'?'':'; Secure'}`;}
 export async function limit(env:Env,key:string,max:number,seconds:number){
@@ -15,6 +15,9 @@ export async function session(req:Request,env:Env){
 export async function csrf(req:Request,s:{csrf_hash:string}){const value=req.headers.get('x-csrf-token')||'';if(!equal(await sha256(value),s.csrf_hash))throw new HttpError(403,'安全驗證失效，請重新登入');}
 export async function login(req:Request,env:Env,body:any){
  if(env.AUTH_PEPPER?.length<32||!env.AUTH_PEPPER)throw new HttpError(503,'後端尚未設定登入金鑰');
+ if(!env.DB||typeof env.DB.prepare!=='function')throw new HttpError(503,'尚未連接 D1 資料庫，請檢查 Pages 的 DB Binding','DATABASE_BINDING_MISSING');
+ const needsRepair=await env.DB.prepare("SELECT 1 FROM admins WHERE active=1 AND password_hash NOT LIKE 'pbkdf2-sha256$100000$%' LIMIT 1").first();
+ if(needsRepair)throw new HttpError(503,'登入密碼格式需要更新，請由維護人員執行相容性修復工具','AUTH_PASSWORD_MIGRATION_REQUIRED');
  const username=text(body.username,'帳號',120).toLowerCase();const password=typeof body.password==='string'?body.password:'';
  if(password.length<1||password.length>256)throw new HttpError(400,'請輸入密碼');
  const ip=req.headers.get('CF-Connecting-IP')||'local';
@@ -22,9 +25,9 @@ export async function login(req:Request,env:Env,body:any){
  await limit(env,'login-account:'+await hashCode(username,env.AUTH_PEPPER),5,900);
  const actor=await env.DB.prepare('SELECT * FROM admins WHERE username=? COLLATE NOCASE').bind(username).first<Actor&{password_hash:string}>();
  // 不存在的帳號也做同等成本的驗證，不回傳帳號是否存在。
- const hash=actor?.password_hash||`pbkdf2-sha256$600000$0000000000000000000000000000000000000000000000000000000000000000$${'0'.repeat(64)}`;
+ const hash=isPasswordHashSupported(actor?.password_hash)?actor.password_hash:`pbkdf2-sha256$100000$0000000000000000000000000000000000000000000000000000000000000000$${'0'.repeat(64)}`;
  const valid=await passwordValid(password,hash,env.AUTH_PEPPER);
- if(!valid||!actor?.active){await audit(env.DB,actor?.id||null,'login',null,'failed').run();throw new HttpError(401,'帳號或密碼錯誤，或帳號已停用');}
+ if(!valid||!actor?.active||!isPasswordHashSupported(actor.password_hash)){await audit(env.DB,actor?.id||null,'login',null,'failed').run();throw new HttpError(401,'帳號或密碼錯誤，或帳號已停用');}
  const token=randomToken(),csrfToken=randomToken(),now=unix();
  await env.DB.batch([
   env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now),

@@ -11,11 +11,12 @@ const origin='http://localhost:5173',authPepper=randomBytes(32).toString('hex'),
 const credentials={username:'test-'+randomUUID(),password:randomBytes(24).toString('hex')};
 let cookie='',csrf='',staffCookie='',staffCsrf='',timeOffset=0;
 let calls:{url:string;body:any;retry:string|null}[]=[],lineStatus=200,lineThrows=false;
+let duringPush:(()=>Promise<void>)|undefined;
 const now=()=>new Date(Date.now()+timeOffset).toISOString();
 beforeAll(async()=>{
  const output=await build({entryPoints:['worker/index.ts'],bundle:true,format:'esm',platform:'browser',write:false});
  mf=new Miniflare({modules:true,script:productionCryptoLimit+output.outputFiles[0].text,compatibilityDate:'2026-07-01',d1Databases:['DB'],bindings:{ALLOWED_ORIGIN:origin,COOKIE_SECURE:'false',AUTH_PEPPER:authPepper,BINDING_PEPPER:bindingPepper,LINE_CHANNEL_SECRET:lineSecret,LINE_CHANNEL_ACCESS_TOKEN:randomBytes(32).toString('hex'),LINE_SEND_ENABLED:'true'},outboundService:async(req:any)=>{
-  calls.push({url:req.url,body:await req.json(),retry:req.headers.get('x-line-retry-key')});if(lineThrows)throw Error('simulated transport failure');return new Response('{}',{status:lineStatus});
+  calls.push({url:req.url,body:await req.json(),retry:req.headers.get('x-line-retry-key')});if(lineThrows)throw Error('simulated transport failure');if(req.url.endsWith('/message/push'))await duringPush?.();return new Response('{}',{status:lineStatus});
  }});
  db=await mf.getD1Database('DB') as unknown as D1Database;
  const sql=readFileSync('migrations/0001_initial.sql','utf8').replace(/--[^\n]*/g,'');
@@ -24,7 +25,7 @@ beforeAll(async()=>{
 },60000);
 afterAll(async()=>{await mf?.dispose();});
 beforeEach(async()=>{
- calls=[];lineStatus=200;lineThrows=false;timeOffset=0;
+ calls=[];lineStatus=200;lineThrows=false;timeOffset=0;duringPush=undefined;
  for(const name of ['handover_revisions','audit_logs','internal_notes','handovers','messages','conversations','notifications','send_requests','unsend_tombstones','webhook_events','binding_codes','teachers','sessions','rate_limits','admins'])await db.prepare(`DELETE FROM ${name}`).run();
  const hash=await passwordHash(credentials.password,authPepper);
  await db.prepare('INSERT INTO admins VALUES(?,?,?,?,?,?,?,?)').bind('test-admin',credentials.username,'測試管理員',hash,'admin',1,now(),now()).run();
@@ -119,6 +120,47 @@ describe('Workers / D1 真實本機 Runtime 整合（LINE HTTP 以 Mock 替代�
  it('批次通知含未綁定教師全部回滾；綁定變更後不再處理待發送',async()=>{
   const bound=await teacher(true),unbound=await teacher();expect((await cmd('send',{request_id:randomUUID(),teacher_ids:[bound,unbound],kind:'mail',content:'測試'})).status).toBe(409);expect((await get('SELECT count(*) AS n FROM notifications')).n).toBe(0);expect(calls).toHaveLength(0);
  });
+  it('回覆成功自動完成對話與這筆回覆，保留包裹待領取及經辦紀錄；重試不重複結案',async()=>{
+   const tid=await teacher(true),t=await get('SELECT * FROM teachers WHERE id=?',tid);
+   await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:'parcel',content:'包裹測試'});
+   await hook([ev('收到，稍後領取',t.line_user_id)]);
+   const inbound=await get("SELECT id FROM messages WHERE direction='in'");
+   const payload={request_id:randomUUID(),teacher_ids:[tid],kind:'reply',content:'好的',complete_conversation:true,last_inbound_id:inbound.id};
+   const response=await cmd('send',payload,staffCookie,staffCsrf);expect(response.status).toBe(200);expect((await response.json() as any).results[0].send_status).toBe('accepted');
+   expect((await get('SELECT status FROM conversations')).status).toBe('已完成');
+   const n=await get("SELECT * FROM notifications WHERE kind='reply'");expect(n.status).toBe('已完成');expect(n.completed_by).toBe('test-staff');expect(n.completed_at).toBeTruthy();
+   expect((await get("SELECT status FROM notifications WHERE kind='parcel'")).status).toBe('待領取');
+   await hook([ev('追加問題',t.line_user_id)]);expect((await get('SELECT status FROM conversations')).status).toBe('待回覆');
+   await cmd('send',payload,staffCookie,staffCsrf);expect((await get('SELECT status FROM conversations')).status).toBe('待回覆');
+   expect((await get("SELECT count(*) AS n FROM audit_logs WHERE action='reply_complete'")).n).toBe(1);
+   expect((await cmd('send',{...payload,complete_conversation:false},staffCookie,staffCsrf)).status).toBe(409);
+  });
+  it('可取消自動完成；沒有入站訊息的主動回覆亦可完成對話',async()=>{
+   const tid=await teacher(true),payload={teacher_ids:[tid],kind:'reply',content:'測試',last_inbound_id:null};
+   await cmd('send',{...payload,request_id:randomUUID(),complete_conversation:true});expect((await get('SELECT status FROM conversations')).status).toBe('已完成');
+   await cmd('send',{...payload,request_id:randomUUID(),complete_conversation:false});expect((await get('SELECT status FROM conversations')).status).toBe('待回覆');
+   expect((await cmd('send',{...payload,request_id:randomUUID(),complete_conversation:'false'})).status).toBe(400);
+  });
+  it('預覽後或 LINE 發送期間收到新訊息，均保留待回覆；不自動結案其他通知',async()=>{
+   const tid=await teacher(true),t=await get('SELECT * FROM teachers WHERE id=?',tid);
+   await hook([ev('第一題',t.line_user_id)]);const old=await get("SELECT id FROM messages WHERE direction='in'");
+   await hook([ev('第二題',t.line_user_id)]);
+   const payload={teacher_ids:[tid],kind:'reply',content:'回答第一題',complete_conversation:true,last_inbound_id:old.id};
+   await cmd('send',{...payload,request_id:randomUUID()});expect((await get('SELECT status FROM conversations')).status).toBe('待回覆');
+   const latest=await get("SELECT id FROM messages WHERE direction='in' ORDER BY rowid DESC LIMIT 1");
+   duringPush=async()=>{expect((await hook([ev('第三題',t.line_user_id)])).status).toBe(200);};
+   await cmd('send',{...payload,request_id:randomUUID(),last_inbound_id:latest.id});expect((await get('SELECT status FROM conversations')).status).toBe('待回覆');
+   expect((await get("SELECT count(*) AS n FROM audit_logs WHERE action='reply_complete'")).n).toBe(0);
+  });
+  it('回覆被 LINE 拒絕或結果未明不結案；舊版前端不帶查看範圍時也不誤結案',async()=>{
+   const tid=await teacher(true),t=await get('SELECT * FROM teachers WHERE id=?',tid);await hook([ev('尚待處理',t.line_user_id)]);
+   const m=await get("SELECT id FROM messages WHERE direction='in'"),payload={teacher_ids:[tid],kind:'reply',content:'測試回覆',complete_conversation:true,last_inbound_id:m.id};
+   for(const status of [401,429,503]){
+    lineStatus=status;const response=await cmd('send',{...payload,request_id:randomUUID()});const result:any=await response.json();expect(result.results[0].error_code).toBe('line_http_'+status);expect((await get('SELECT status FROM conversations')).status).toBe('待回覆');
+   }
+   expect((await get("SELECT count(*) AS n FROM notifications WHERE status='已完成'")).n).toBe(0);
+   lineStatus=200;await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:'reply',content:'舊版前端回覆'});expect((await get('SELECT status FROM conversations')).status).toBe('待回覆');
+  });
  it('LINE 429 記失敗，5xx 記結果未明；中斷發送也不自動重送',async()=>{
   const tid=await teacher(true);lineStatus=429;await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:'contact',content:'測試一'});expect((await get('SELECT send_status FROM notifications')).send_status).toBe('failed');
   lineStatus=503;await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:'contact',content:'測試二'});const n=await get("SELECT * FROM notifications WHERE send_status='uncertain'");expect(n).toBeTruthy();const count=calls.length;await cmd('dispatch',{id:n.id});expect(calls.length).toBe(count);

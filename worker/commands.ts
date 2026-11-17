@@ -1,7 +1,7 @@
 import{type Env,type Actor,HttpError,iso,unix,text,id,admin,audit,rows}from'./types';
 import{generateCode,hashCode,sha256,passwordHash}from'./security';
 import{limit}from'./auth';
-import{dispatch}from'./line';
+import{dispatch,type ReplyCompletion}from'./line';
 export async function command(env:Env,actor:Actor,action:string,p:any){
  const db=env.DB,now=iso();
  if(['teacher_save','issue_code','unbind','staff_save','template_save','system_status'].includes(action))admin(actor);
@@ -56,7 +56,16 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
   const content=text(p.content,'訊息'),kind=p.kind,request=id(p.request_id);
   if(!['mail','parcel','contact','custom','reply'].includes(kind)||!Array.isArray(p.teacher_ids)||p.teacher_ids.length<1||p.teacher_ids.length>100)throw new HttpError(400,'通知類型或對象錯誤，每批 1 至 100 位');
   const ids=[...new Set<string>(p.teacher_ids.map(id))].sort();
-  const fingerprint=await sha256(JSON.stringify({ids,content,kind}));
+  let reply:ReplyCompletion|undefined;
+  if(kind==='reply'){
+   if(ids.length!==1)throw new HttpError(400,'聊天回覆一次限一位教師');
+   // 舊版前端未傳入已查看的訊息時，保留手動處理，避免誤結新訊息。
+   if(Object.hasOwn(p,'last_inbound_id')){
+    if(typeof p.complete_conversation!=='boolean')throw new HttpError(400,'請選擇回覆後的處理方式');
+    reply={complete:p.complete_conversation,lastInboundId:p.last_inbound_id===null?null:id(p.last_inbound_id)};
+   }
+  }
+  const fingerprint=await sha256(JSON.stringify({ids,content,kind,...(reply?{reply}:{})}));
   const existing=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();
   if(existing&&(existing.fingerprint!==fingerprint||existing.actor_id!==actor.id))throw new HttpError(409,'重複請求內容不一致');
   await limit(env,'send:'+actor.id,30,60);
@@ -71,8 +80,9 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
   await db.batch(statements);
   const req=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();if(req.fingerprint!==fingerprint||req.actor_id!==actor.id)throw new HttpError(409,'重複請求內容不一致');
   const notices=await rows<{id:string}>(db.prepare('SELECT id FROM notifications WHERE request_id=? ORDER BY teacher_id').bind(request));
-  for(const n of notices.slice(0,5))await dispatch(env,actor,n.id);
-  return {data:notices.map(n=>n.id)};
+  for(const n of notices.slice(0,5))await dispatch(env,actor,n.id,reply);
+  const results=await rows(db.prepare('SELECT id,send_status,error_code FROM notifications WHERE request_id=? ORDER BY teacher_id').bind(request));
+  return {data:notices.map(n=>n.id),results};
  }
  if(action==='dispatch'){await dispatch(env,actor,id(p.id));return {};}
  throw new HttpError(400,'不支援的操作');

@@ -56,7 +56,21 @@ export async function command(action:string,payload:any={}):Promise<any>{
  if(action==='mock_bind'){const c=codes.get(payload.code.trim().toUpperCase().replace(/[ -]/g,''));if(!c||c.expires<=Date.now())throw Error('綁定碼無效或已過期');const teacher=demo.teachers.find(t=>t.id===c.teacher_id)!;if(!teacher.active||teacher.bound_at)throw Error('無法重複綁定');teacher.bound_at=now();codes.delete(payload.code.trim().toUpperCase().replace(/[ -]/g,''));}
  if(action==='send'){
  for(const id of payload.teacher_ids){const teacher=demo.teachers.find(t=>t.id===id);if(!teacher?.active||!teacher.bound_at)throw Error('教師尚未綁定或已停用');}
- for(const id of payload.teacher_ids){if(demo.notifications.some((n:any)=>n.request_id===payload.request_id&&n.teacher_id===id))continue;const notificationId=crypto.randomUUID();demo.notifications.unshift({id:notificationId,...payload,teacher_id:id,send_status:'accepted',status:['mail','parcel'].includes(payload.kind)?'待領取':'待回覆',sender_id:demoRole==='admin'?'demo-admin':'demo-staff',created_at:now()});demo.messages.push({id:crypto.randomUUID(),teacher_id:id,notification_id:notificationId,direction:'out',content:payload.content,created_at:now()});demo.teachers.find(t=>t.id===id)!.last_notified_at=now();}
+ for(const id of payload.teacher_ids){
+  if(demo.notifications.some((n:any)=>n.request_id===payload.request_id&&n.teacher_id===id))continue;
+  const notificationId=crypto.randomUUID(),isReply=payload.kind==='reply',sentAt=now();
+  demo.notifications.unshift({id:notificationId,...payload,teacher_id:id,send_status:'accepted',status:isReply?'已完成':['mail','parcel'].includes(payload.kind)?'待領取':'待回覆',sender_id:actor,created_at:sentAt,...(isReply?{completed_at:sentAt,completed_by:actor}:{})});
+  demo.messages.push({id:crypto.randomUUID(),teacher_id:id,notification_id:notificationId,direction:'out',content:payload.content,created_at:sentAt});demo.teachers.find(t=>t.id===id)!.last_notified_at=sentAt;
+  if(isReply&&Object.hasOwn(payload,'last_inbound_id')){
+   const latest=[...demo.messages].reverse().find(m=>m.teacher_id===id&&m.direction==='in')?.id??null;
+   if(!payload.complete_conversation||latest===payload.last_inbound_id){
+    const status=payload.complete_conversation?'已完成':'待回覆',conv=demo.conversations.find(c=>c.teacher_id===id);
+    if(conv)Object.assign(conv,{status,updated_at:sentAt});else demo.conversations.push({teacher_id:id,status,updated_at:sentAt});
+    demo.audit_logs.unshift({id:crypto.randomUUID(),action:payload.complete_conversation?'reply_complete':'reply_pending',actor_id:actor,teacher_id:id,created_at:sentAt});
+   }
+  }
+ }
+ const sent=demo.notifications.filter((n:any)=>n.request_id===payload.request_id);result={data:sent.map(n=>n.id),results:sent.map(n=>({id:n.id,send_status:n.send_status,error_code:n.error_code}))};
  }
  if(action==='mock_inbound'){if(!t?.bound_at)throw Error('請先綁定');const conv=demo.conversations.find(c=>c.teacher_id===t.id);if(conv)conv.status='待回覆';else demo.conversations.push({teacher_id:t.id,status:'待回覆'});demo.messages.push({id:crypto.randomUUID(),teacher_id:t.id,direction:'in',content:payload.content,created_at:now()});}
  if(action==='conversation_status'){const c=demo.conversations.find(c=>c.teacher_id===payload.teacher_id);if(c)c.status=payload.status;else demo.conversations.push(payload);}

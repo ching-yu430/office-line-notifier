@@ -9,10 +9,10 @@ import{passwordHash}from'../../worker/security';
 const origin='http://localhost:5174';
 let mf:Miniflare,vite:ChildProcess;
 const username='browser-'+randomUUID(),password=randomBytes(24).toString('hex'),authPepper=randomBytes(32).toString('hex'),bindingPepper=randomBytes(32).toString('hex'),lineSecret=randomBytes(32).toString('hex');
-let lineCalls:any[]=[];
+let lineCalls:any[]=[],lineStatus=200;
 test.beforeAll(async()=>{
  const built=await build({entryPoints:['worker/index.ts'],bundle:true,format:'esm',platform:'browser',write:false});
- mf=new Miniflare({modules:true,script:productionCryptoLimit+built.outputFiles[0].text,compatibilityDate:'2026-07-01',d1Databases:['DB'],bindings:{ALLOWED_ORIGIN:origin,COOKIE_SECURE:'false',AUTH_PEPPER:authPepper,BINDING_PEPPER:bindingPepper,LINE_CHANNEL_SECRET:lineSecret,LINE_CHANNEL_ACCESS_TOKEN:randomBytes(32).toString('hex'),LINE_SEND_ENABLED:'true'},outboundService:async(req:any)=>{lineCalls.push(await req.json());return new Response('{}');}});
+  mf=new Miniflare({modules:true,script:productionCryptoLimit+built.outputFiles[0].text,compatibilityDate:'2026-07-01',d1Databases:['DB'],bindings:{ALLOWED_ORIGIN:origin,COOKIE_SECURE:'false',AUTH_PEPPER:authPepper,BINDING_PEPPER:bindingPepper,LINE_CHANNEL_SECRET:lineSecret,LINE_CHANNEL_ACCESS_TOKEN:randomBytes(32).toString('hex'),LINE_SEND_ENABLED:'true'},outboundService:async(req:any)=>{lineCalls.push(await req.json());return new Response('{}',{status:lineStatus});}});
  const db=await mf.getD1Database('DB');const sql=readFileSync('migrations/0001_initial.sql','utf8').replace(/--[^\n]*/g,'');await db.batch(sql.split(/;\s*(?=(?:CREATE|INSERT|ALTER|PRAGMA|$))/g).map(s=>s.trim()).filter(Boolean).map(sql=>db.prepare(sql)));
  const now=new Date().toISOString();await db.prepare('INSERT INTO admins VALUES(?,?,?,?,?,?,?,?)').bind('browser-admin',username,'瀏覽器測試管理員',await passwordHash(password,authPepper),'admin',1,now,now).run();
  vite=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','localhost','--port','5174','--strictPort'],{env:{...process.env,VITE_APP_MODE:'cloudflare',VITE_API_BASE:'/api',VITE_BASE_PATH:'/'},stdio:'ignore'});
@@ -20,7 +20,7 @@ test.beforeAll(async()=>{
 });
 test.afterAll(async()=>{vite?.kill();await mf?.dispose();});
 test('Cloudflare 模式：實際 Cookie 登入、綁定、推播 Mock、簽章 Webhook、輪詢顯示與登出',async({page})=>{
- test.setTimeout(60000);
+ test.setTimeout(90000);
  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
  // 將瀏覽器 API 導向真實本機 workerd＋D1；對外 LINE HTTP 為 Mock，沒有真實個資或憑證。
  await page.route(origin+'/api/**',async route=>{const req=route.request();const response=await mf.dispatchFetch('http://localhost'+new URL(req.url()).pathname,{method:req.method(),headers:await req.allHeaders(),...(req.method()==='POST'?{body:req.postData()!}:{})});await route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()});});
@@ -31,6 +31,10 @@ test('Cloudflare 模式：實際 Cookie 登入、綁定、推播 Mock、簽章 W
  await hook(code!);await expect(row.getByText('已綁定',{exact:true})).toBeVisible({timeout:20000});
  await page.getByRole('button',{name:'發送通知',exact:true}).click();await page.locator('.teacher-option').getByRole('checkbox').check();await page.getByRole('button',{name:'預覽通知'}).click();await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);expect(lineCalls.some(c=>c.to===uid&&c.messages[0].text.includes('信件'))).toBe(true);
  await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').click();await expect(page.locator('.attachment-hint')).toHaveText('文件及附件請使用辦公室 Email 傳送');await hook('測試教師回覆已收到');await expect(page.locator('.messages')).toContainText('測試教師回覆已收到',{timeout:20000});
+  await expect(page.getByLabel('回覆後完成對話')).toBeChecked();
+  lineStatus=401;await page.getByLabel('回覆老師',{exact:true}).fill('辦公室網頁回覆測試');await page.getByRole('button',{name:'回覆',exact:true}).click();await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByRole('alert')).toContainText('發送失敗，內容已保留');await expect(page.getByLabel('回覆老師',{exact:true})).toHaveValue('辦公室網頁回覆測試');await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');await expect(page.locator('.messages')).not.toContainText('辦公室網頁回覆測試');
+  lineStatus=200;await page.getByRole('button',{name:'回覆',exact:true}).click();await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByLabel('對話處理狀態')).toHaveValue('已完成');await expect(page.getByLabel('回覆老師',{exact:true})).toHaveValue('');await expect(page.locator('.messages')).toContainText('已送出');await expect(page.locator('body')).not.toContainText('API 已接受');
  await page.reload();await expect(page.getByRole('heading',{name:'值班工作台'})).toBeVisible();await page.getByRole('button',{name:'系統管理',exact:true}).click();await page.getByRole('button',{name:'新增行政帳號'}).click();await page.getByLabel('登入帳號',{exact:true}).fill('staff-'+randomUUID());await page.getByLabel('初始密碼',{exact:true}).fill(randomBytes(20).toString('hex'));await page.getByLabel('顯示名稱',{exact:true}).fill('虛構新行政人員');await page.getByRole('button',{name:'儲存權限'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.locator('.settings-grid')).toContainText('虛構新行政人員');
  await page.getByRole('button',{name:'登出',exact:true}).click();await expect(page.getByRole('button',{name:'登入辦公室'})).toBeVisible();expect(errors).toEqual([]);
 });

@@ -67,9 +67,9 @@ Workers 先驗證原始位元組對應的 LINE HMAC-SHA256，再解析大小受�
 
 原子 `UPDATE ... RETURNING` 只允許一個執行者把 queued 變成 sending；呼叫 LINE 前重查教師及綁定版本。HTTP 成功或 LINE 可辨認的 retry-key 409 記 accepted，4xx 記 failed，5xx／連線逾時記 uncertain。超過兩分鐘未完成的 sending 在讀取快照／下一次發送時轉 uncertain，不自動重送。只有 accepted 才新增對外聊天紀錄，並保留通知關聯與操作人。
 
-訊息中心的 `kind=reply` 一次限一位教師。前端預覽時保存 `last_inbound_id` 與 `complete_conversation`，兩者納入請求內容指紋；修改後不能重用原請求。LINE 接受回覆後，D1 同一批次新增訊息、完成該筆回覆通知、記錄經辦人，再依選項更新對話。自動完成前比較該教師最後收到的入站訊息 ID；比較與更新在 D1 batch 內，預覽後／對外請求中到達的新訊息不會被一併完成。新的 Webhook 會重新標記待回覆。包裹、信件及其他既有通知不隨之完成。
+訊息中心的 `kind=reply` 一次限一位教師。前端送出時保存 `last_inbound_id`；預設回覆後更新已回覆狀態，保留舊客戶端 `complete_conversation` 選項相容性，兩者納入請求內容指紋；修改後不能重用原請求。LINE 接受回覆後，D1 同一批次新增訊息、完成該筆回覆通知、記錄經辦人，再依選項更新對話。自動完成前比較該教師最後收到的入站訊息 ID；比較與更新在 D1 batch 內，預覽後／對外請求中到達的新訊息不會被一併完成。新的 Webhook 會重新標記待回覆。包裹、信件及其他既有通知不隨之完成。
 
-完成選項只由本次 `send` 傳給同步 `dispatch`，沒有更動資料表。舊前端或事後手動處理 queued 回覆若缺少預覽上下文，僅完成該筆已送出的回覆通知，不自動更改對話。重試已處理通知不會再次結案。`send` 回傳逐筆 `results`，前端只有在本次全部 accepted 後清空草稿；failed／uncertain 保留內容及明確提示。畫面將 accepted 顯示為「已送出」，資料庫仍使用原狀態，未加入送達或已讀欄位。
+完成上下文由本次 `send` 傳給同步 `dispatch`。舊前端或事後手動處理 queued 回覆若缺少預覽上下文，僅完成該筆已送出的回覆通知，不自動更改對話。重試已處理通知不會再次結案。`send` 回傳逐筆 `results`，前端只有在本次全部 accepted 後清空草稿；failed／uncertain 保留內容及明確提示。畫面將 accepted 顯示為「已送出」，資料庫仍使用原狀態，未加入送達或已讀欄位。
 
 解除綁定無法撤回已交給 LINE 的請求；操作人應停止該教師通知後再核對身分。任何網路系統皆無法將資料庫交易與外部 LINE API 變成同一個原子交易，因此不可宣稱「絕不重複」或「API 成功即教師收到」。
 
@@ -88,3 +88,14 @@ Workers 先驗證原始位元組對應的 LINE HMAC-SHA256，再解析大小受�
 | POST /api/line/webhook | LINE 原始本文簽章，免行政 Session；只有此路徑免 Origin／CSRF |
 
 所有 API 錯誤為繁體中文 JSON；不輸出 SQL、參數、Token 或 LINE 原始錯誤。Schema 後續調整新增 Migration，不改寫已套用的正式 Migration。
+
+
+## 共同值班更新
+
+`0002_workflow.sql` 保留既有資料，新增 `conversation_views`（依行政帳號的入站訊息序號）、`reply_presence`（教師／帳號／分頁、45 秒期限）、`undo_actions`（原操作人、一次性、版本與期限）。`notifications` 增加 `version` 與 `operation_token`。所有命令仍經 Session、來源及 CSRF 驗證，presence／view 另外限流，不傳送草稿。
+
+快照增加 `inbox`（每位教師最後訊息與目前使用者未查看數）、`presence`（仍啟用的人員姓名及期限）。過期 presence 清除會更新 ETag，避免 304 留住過期提示。進入對話後按實際已載入的入站訊息 ID 更新查看序號；序號只前進，不影響 LINE 已讀或對話待回覆狀態。`GET /api/conversation?teacher_id=...` 另載入該教師最近 200 則訊息及最多 200 筆待領件，不暴露 LINE User ID 或來源雜湊。
+
+完成領取或交接時，D1 batch 以版本更新並登記原操作人專用的復原資料；只保存需復原的狀態欄位。復原檢查 actor、有效期、未使用、當前版本及 operation token，原子恢復完成欄位、遞增版本並記錄稽核；交接再新增含原完成人的前後版本紀錄。過期復原資料一天後清理，正式稽核不刪除。
+
+畫面僅映射狀態標籤：對話已完成顯示已回覆；信件／包裹已完成顯示已領取；其他通知顯示已處理。資料庫原 enum 與既有 API 值相容。

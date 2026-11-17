@@ -1,3 +1,4 @@
+import {migrationStatements} from './migrations';
 import{productionCryptoLimit}from'./production-crypto';
 import type{D1Database}from'@cloudflare/workers-types';
 import{beforeAll,beforeEach,afterAll,it,expect,describe}from'vitest';
@@ -19,14 +20,13 @@ beforeAll(async()=>{
   calls.push({url:req.url,body:await req.json(),retry:req.headers.get('x-line-retry-key')});if(lineThrows)throw Error('simulated transport failure');if(req.url.endsWith('/message/push'))await duringPush?.();return new Response('{}',{status:lineStatus});
  }});
  db=await mf.getD1Database('DB') as unknown as D1Database;
- const sql=readFileSync('migrations/0001_initial.sql','utf8').replace(/--[^\n]*/g,'');
- const statements=sql.split(/;\s*(?=(?:CREATE|INSERT|ALTER|PRAGMA|$))/g).map(s=>s.trim()).filter(Boolean);
+ const statements=migrationStatements();
  await db.batch(statements.map(sql=>db.prepare(sql)));
 },60000);
 afterAll(async()=>{await mf?.dispose();});
 beforeEach(async()=>{
  calls=[];lineStatus=200;lineThrows=false;timeOffset=0;duringPush=undefined;
- for(const name of ['handover_revisions','audit_logs','internal_notes','handovers','messages','conversations','notifications','send_requests','unsend_tombstones','webhook_events','binding_codes','teachers','sessions','rate_limits','admins'])await db.prepare(`DELETE FROM ${name}`).run();
+ for(const name of ['undo_actions','reply_presence','conversation_views','handover_revisions','audit_logs','internal_notes','handovers','messages','conversations','notifications','send_requests','unsend_tombstones','webhook_events','binding_codes','teachers','sessions','rate_limits','admins'])await db.prepare(`DELETE FROM ${name}`).run();
  const hash=await passwordHash(credentials.password,authPepper);
  await db.prepare('INSERT INTO admins VALUES(?,?,?,?,?,?,?,?)').bind('test-admin',credentials.username,'測試管理員',hash,'admin',1,now(),now()).run();
  await db.prepare('INSERT INTO admins VALUES(?,?,?,?,?,?,?,?)').bind('test-staff',credentials.username+'-staff','測試行政人員',hash,'staff',1,now(),now()).run();
@@ -41,6 +41,61 @@ async function issue(tid:string){const r=await cmd('issue_code',{teacher_id:tid}
 function ev(text:string,uid='U'+randomUUID(),eventId=randomUUID(),messageId=randomUUID()){return {webhookEventId:eventId,type:'message',timestamp:Date.now(),source:{type:'user',userId:uid},message:{id:messageId,type:'text',text},replyToken:randomBytes(16).toString('hex')};}
 async function hook(events:any[],raw?:string,sig?:string){const body=raw??JSON.stringify({events});return mf.dispatchFetch('http://localhost/api/line/webhook',{method:'POST',headers:{'x-line-signature':sig??createHmac('sha256',lineSecret).update(body).digest('base64')},body});}
 async function get<T=any>(sql:string,...args:any[]){return db.prepare(sql).bind(...args).first<T>();}
+it('未查看依登入人員分開計算，僅更新實際查看的訊息，不倒退或清掉後續訊息',async()=>{
+ const tid=await teacher(true),other=await teacher(true),t=await get('SELECT * FROM teachers WHERE id=?',tid);
+ await hook([ev('第一則',t.line_user_id)]);const first=await get("SELECT id FROM messages WHERE teacher_id=?",tid);
+ const inbox=async(c=cookie,token=csrf)=>(await (await request('/data',undefined,c,token)).json() as any).inbox.find((i:any)=>i.teacher_id===tid);
+ expect((await inbox()).unread_count).toBe(1);
+ expect((await cmd('conversation_view',{teacher_id:other,message_id:first.id})).status).toBe(409);
+ await cmd('conversation_view',{teacher_id:tid,message_id:first.id});expect((await inbox()).unread_count).toBe(0);expect((await inbox(staffCookie,staffCsrf)).unread_count).toBe(1);
+ await hook([ev('第二則',t.line_user_id)]);await cmd('conversation_view',{teacher_id:tid,message_id:first.id});expect((await inbox()).unread_count).toBe(1);
+ const last=await get("SELECT id FROM messages WHERE teacher_id=? ORDER BY rowid DESC LIMIT 1",tid);await cmd('conversation_view',{teacher_id:tid,message_id:last.id});await cmd('conversation_view',{teacher_id:tid,message_id:first.id});expect((await inbox()).unread_count).toBe(0);
+ expect((await get('SELECT status FROM conversations WHERE teacher_id=?',tid)).status).toBe('待回覆');expect(calls).toHaveLength(0);
+});
+it('正在回覆提示不儲存草稿，同一人不同分頁獨立，停用及逾期自動隱藏',async()=>{
+ const tid=await teacher(true),one=randomUUID(),two=randomUUID();
+ expect((await cmd('presence',{teacher_id:tid,client_id:one,typing:true},staffCookie,staffCsrf)).status).toBe(200);
+ await cmd('presence',{teacher_id:tid,client_id:two,typing:true},staffCookie,staffCsrf);
+ await cmd('presence',{teacher_id:tid,client_id:one,typing:false},staffCookie,staffCsrf);expect((await get('SELECT count(*) AS n FROM reply_presence')).n).toBe(1);
+ let data:any=await(await request('/data')).json();expect(data.presence[0].display_name).toBe('測試行政人員');expect(data.presence[0].client_id).toBeUndefined();
+ await db.prepare('UPDATE admins SET active=0 WHERE id=?').bind('test-staff').run();data=await(await request('/data')).json();expect(data.presence).toHaveLength(0);
+ await db.prepare('UPDATE reply_presence SET expires_at=0').run();await request('/data');expect((await get('SELECT count(*) AS n FROM reply_presence')).n).toBe(0);expect(calls).toHaveLength(0);
+});
+it('領取完成可以快速復原，限原操作人且保留稽核；已使用不能再復原',async()=>{
+ const tid=await teacher(true);await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:'parcel',content:'測試包裹'});
+ const n=await get('SELECT * FROM notifications'),response=await cmd('complete',{id:n.id,status:'已完成',expected_version:1},staffCookie,staffCsrf),result:any=await response.json();expect(result.undo.id).toBeTruthy();
+ expect((await cmd('undo',{id:result.undo.id})).status).toBe(404);
+ expect((await cmd('undo',{id:result.undo.id},staffCookie,staffCsrf)).status).toBe(200);
+ const restored=await get('SELECT * FROM notifications');expect(restored.status).toBe('待領取');expect(restored.completed_at).toBeNull();expect(restored.completed_by).toBeNull();expect(restored.version).toBe(3);
+ expect((await cmd('undo',{id:result.undo.id},staffCookie,staffCsrf)).status).toBe(409);expect((await get("SELECT count(*) AS n FROM audit_logs WHERE action='undo'")).n).toBe(1);expect(calls).toHaveLength(1);
+});
+it('紀錄被其他人更新或快速復原過期，拒絕覆蓋；過期版本的完成也拒絕',async()=>{
+ const tid=await teacher(true);await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:'mail',content:'測試信件'});
+ const n=await get('SELECT * FROM notifications'),result:any=await(await cmd('complete',{id:n.id,status:'已完成',expected_version:1})).json();
+ expect((await cmd('complete',{id:n.id,status:'待領取',expected_version:1})).status).toBe(409);
+ await cmd('complete',{id:n.id,status:'待領取',expected_version:2},staffCookie,staffCsrf);expect((await cmd('undo',{id:result.undo.id})).status).toBe(409);
+ const next:any=await(await cmd('complete',{id:n.id,status:'已完成',expected_version:3})).json();await db.prepare('UPDATE undo_actions SET expires_at=0 WHERE id=?').bind(next.undo.id).run();expect((await cmd('undo',{id:next.undo.id})).status).toBe(409);expect((await get('SELECT status FROM notifications')).status).toBe('已完成');
+});
+it('交接快速復原保留完成人及修改前後版本，之後仍能重新完成',async()=>{
+ const hid=randomUUID();await cmd('handover_create',{id:hid,content:'測試交接',handover_name:'測試交接人'});
+ const done:any=await(await cmd('handover_complete',{id:hid,expected_version:1,finisher_name:'測試完成人'})).json();
+ expect((await cmd('undo',{id:done.undo.id})).status).toBe(200);const h=await get('SELECT * FROM handovers');expect(h.completed_at).toBeNull();expect(h.finisher_name).toBeNull();expect(h.version).toBe(3);
+ const rev=await get("SELECT * FROM handover_revisions WHERE action='handover_undo'");expect(JSON.parse(rev.before_data).finisher_name).toBe('測試完成人');expect(JSON.parse(rev.after_data).finisher_name).toBeNull();
+ expect((await cmd('handover_complete',{id:hid,expected_version:3,finisher_name:'再次完成者'})).status).toBe(200);
+});
+it('查看、輸入提示與復原 API 必須登入並通過 CSRF',async()=>{
+ for(const action of ['presence','conversation_view','undo']){
+  expect((await cmd(action,{},'','')).status).toBe(401);expect((await cmd(action,{},cookie,'wrong')).status).toBe(403);
+ }
+});
+it('個別教師的較早訊息與待領取可單獨載入，不受全站最近 500 筆限制',async()=>{
+ const tid=await teacher(true),other=await teacher(true),t=await get('SELECT * FROM teachers WHERE id=?',tid);
+ await hook([ev('較早的測試對話',t.line_user_id)]);await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:'mail',content:'較早信件'});
+ await db.prepare(`WITH RECURSIVE seq(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<501) INSERT INTO messages(id,teacher_id,direction,content,created_at) SELECT 'later-'||n,?,'in','其他教師後續訊息',? FROM seq`).bind(other,new Date(Date.now()+1000).toISOString()).run();
+ const snapshot:any=await(await request('/data')).json();expect(snapshot.messages.some((m:any)=>m.teacher_id===tid)).toBe(false);
+ const r=await request('/conversation?teacher_id='+tid);expect(r.status).toBe(200);const data:any=await r.json();expect(data.messages.some((m:any)=>m.content==='較早的測試對話')).toBe(true);expect(data.pickups[0].kind).toBe('mail');expect(JSON.stringify(data)).not.toContain(t.line_user_id);expect(data.messages[0].line_source_hash).toBeUndefined();
+ expect((await request('/conversation?teacher_id='+tid,undefined,'')).status).toBe(401);
+});
 describe('Workers / D1 真實本機 Runtime 整合（LINE HTTP 以 Mock 替代）',()=>{
  it('登入、HttpOnly Cookie、CSRF、登出及 Session 到期',async()=>{
   const r=await request('/login',credentials,'','');expect(r.headers.get('set-cookie')).toContain('HttpOnly');expect(r.headers.get('set-cookie')).toContain('SameSite=Lax');

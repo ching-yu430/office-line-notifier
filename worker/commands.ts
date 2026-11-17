@@ -2,8 +2,10 @@ import{type Env,type Actor,HttpError,iso,unix,text,id,admin,audit,rows}from'./ty
 import{generateCode,hashCode,sha256,passwordHash}from'./security';
 import{limit}from'./auth';
 import{dispatch,type ReplyCompletion}from'./line';
+import{workflowCommand,saveUndo,undoInfo}from'./workflow';
 export async function command(env:Env,actor:Actor,action:string,p:any){
  const db=env.DB,now=iso();
+ const result=await workflowCommand(env,actor,action,p);if(result!==undefined)return result;
  if(['teacher_save','issue_code','unbind','staff_save','template_save','system_status'].includes(action))admin(actor);
  if(action==='system_status')return {send_enabled:env.LINE_SEND_ENABLED==='true',line_configured:!!env.LINE_CHANNEL_ACCESS_TOKEN&&!!env.LINE_CHANNEL_SECRET,binding_configured:env.BINDING_PEPPER?.length>=32};
  if(action==='teacher_save'){
@@ -47,10 +49,6 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
   if(!['待回覆','已完成'].includes(p.status))throw new HttpError(400,'對話狀態錯誤');
   const tid=id(p.teacher_id);await db.batch([db.prepare('INSERT INTO conversations(teacher_id,status,updated_at) VALUES(?,?,?) ON CONFLICT(teacher_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at').bind(tid,p.status,now),audit(db,actor.id,action,tid)]);return {};
  }
- if(action==='complete'){
-  if(!['待領取','待回覆','已完成'].includes(p.status))throw new HttpError(400,'處理狀態錯誤');
-  await db.batch([db.prepare('UPDATE notifications SET status=?,completed_at=?,completed_by=? WHERE id=?').bind(p.status,p.status==='已完成'?now:null,p.status==='已完成'?actor.id:null,id(p.id)),audit(db,actor.id,action)]);return {};
- }
  if(action==='send'){
   if(env.LINE_SEND_ENABLED!=='true'||!env.LINE_CHANNEL_ACCESS_TOKEN)throw new HttpError(409,'真實發送尚未啟用，請先完成測試與核准');
   const content=text(p.content,'訊息'),kind=p.kind,request=id(p.request_id);
@@ -61,8 +59,8 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
    if(ids.length!==1)throw new HttpError(400,'聊天回覆一次限一位教師');
    // 舊版前端未傳入已查看的訊息時，保留手動處理，避免誤結新訊息。
    if(Object.hasOwn(p,'last_inbound_id')){
-    if(typeof p.complete_conversation!=='boolean')throw new HttpError(400,'請選擇回覆後的處理方式');
-    reply={complete:p.complete_conversation,lastInboundId:p.last_inbound_id===null?null:id(p.last_inbound_id)};
+    if(p.complete_conversation!=null&&typeof p.complete_conversation!=='boolean')throw new HttpError(400,'回覆處理方式格式錯誤');
+    reply={complete:p.complete_conversation!==false,lastInboundId:p.last_inbound_id===null?null:id(p.last_inbound_id)};
    }
   }
   const fingerprint=await sha256(JSON.stringify({ids,content,kind,...(reply?{reply}:{})}));
@@ -104,10 +102,10 @@ async function handover(env:Env,actor:Actor,action:string,p:any){
   else if(action==='handover_edit'){sql='content=?,handover_name=?,finisher_name=?';args=[text(p.content,'交接內容',2000),text(p.handover_name,'交接人',80),before.completed_at?text(p.finisher_name,'完成人姓名',80):null];}
   else if(action==='handover_reopen'){sql='completed_at=NULL,completed_by=NULL,completed_name=NULL,finisher_name=NULL';args=[];}
   else throw new HttpError(400,'不支援的交接操作');
-  await db.batch([db.prepare(`UPDATE handovers SET ${sql},version=version+1,operation_token=? WHERE id=? AND version=?`).bind(...args,operation,hid,p.expected_version),revision(db,actor,hid,action,before,operation,reason),handoverAudit(db,actor,action,hid,operation)]);
+  await db.batch([db.prepare(`UPDATE handovers SET ${sql},version=version+1,operation_token=? WHERE id=? AND version=?`).bind(...args,operation,hid,p.expected_version),revision(db,actor,hid,action,before,operation,reason),handoverAudit(db,actor,action,hid,operation),...(action==='handover_complete'?[saveUndo(env,actor,'handover',before,operation)]:[])]);
  }
  const after=await db.prepare('SELECT * FROM handovers WHERE id=?').bind(hid).first<any>();
- if(after.operation_token!==operation)throw new HttpError(409,'交接事項已被更新，請重新整理後再操作');return {data:after};
+ if(after.operation_token!==operation)throw new HttpError(409,'交接事項已被更新，請重新整理後再操作');return {data:after,...(action==='handover_complete'?{undo:undoInfo(operation)}:{})};
 }
 function revision(db:D1Database,actor:Actor,hid:string,action:string,before:any,operation:string,reason:string|null){
  return db.prepare(`INSERT INTO handover_revisions(id,handover_id,action,actor_id,actor_name,before_data,after_data,reason,created_at,json_version) SELECT ?,id,?,?,?, ?,json_object('id',id,'content',content,'created_by',created_by,'creator_name',creator_name,'handover_name',handover_name,'created_at',created_at,'completed_at',completed_at,'completed_by',completed_by,'completed_name',completed_name,'finisher_name',finisher_name,'version',version),?,?,version FROM handovers WHERE id=? AND operation_token=?`).bind(operation,action,actor.id,actor.display_name,before?JSON.stringify(before):null,reason,iso(),hid,operation);

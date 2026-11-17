@@ -39,12 +39,21 @@ export default {
    const s=await session(req,env);if(req.method==='POST')await csrf(req,s);
    if(path==='/api/session'&&req.method==='GET')return json({actor:{id:s.id,username:s.username,display_name:s.display_name,role:s.role},csrf:s.csrf_token});
    if(path==='/api/logout'&&req.method==='POST'){await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(s.token_hash),audit(env.DB,s.id,'logout')]);headers.set('Set-Cookie',cookie('',env,0));return json({ok:true});}
+   if(path==='/api/conversation'&&req.method==='GET'){
+    const tid=url.searchParams.get('teacher_id');if(!tid||!/^[a-zA-Z0-9_-]{1,80}$/.test(tid))throw new HttpError(400,'教師識別碼格式錯誤');
+    if(!await env.DB.prepare('SELECT id FROM teachers WHERE id=?').bind(tid).first())throw new HttpError(404,'找不到教師');
+    const results=await env.DB.batch([
+     env.DB.prepare(`SELECT m.id,m.teacher_id,m.direction,m.content,m.message_type,m.created_at,m.notification_id,m.withdrawn,a.display_name AS sender_name FROM (SELECT * FROM messages WHERE teacher_id=? ORDER BY rowid DESC LIMIT 200) m LEFT JOIN notifications n ON n.id=m.notification_id LEFT JOIN admins a ON a.id=n.sender_id ORDER BY m.created_at,m.id`).bind(tid),
+     env.DB.prepare("SELECT * FROM notifications WHERE teacher_id=? AND kind IN ('mail','parcel') AND status='待領取' ORDER BY created_at DESC LIMIT 200").bind(tid)
+    ]);return json({messages:results[0].results,pickups:results[1].results});
+   }
    if(path==='/api/data'&&req.method==='GET'){
     await recover(env.DB);
+    await env.DB.batch([env.DB.prepare('DELETE FROM reply_presence WHERE expires_at<=?').bind(unix()),env.DB.prepare('DELETE FROM undo_actions WHERE expires_at<?').bind(unix()-86400)]);
     const version=(await env.DB.prepare('SELECT version FROM system_meta WHERE id=1').first<{version:number}>())!.version;
     const etag=`"${s.id}-${s.role}-${version}"`;headers.set('ETag',etag);
     if(req.headers.get('if-none-match')===etag)return new Response(null,{status:304,headers});
-    const names=['teachers','notifications','messages','staff','templates','audit_logs','conversations','handovers','internal_notes','handover_revisions'];
+    const names=['teachers','notifications','messages','staff','templates','audit_logs','conversations','handovers','internal_notes','handover_revisions','inbox','presence'];
     // 不向瀏覽器暴露 LINE User ID、密碼雜湊、Session、綁定碼雜湊。
     const queries=[
      'SELECT id,name,department,notes,active,bound_at,last_notified_at FROM teachers ORDER BY name LIMIT 1000',
@@ -56,9 +65,16 @@ export default {
      'SELECT * FROM conversations',
      'SELECT id,content,created_by,creator_name,handover_name,created_at,completed_at,completed_by,completed_name,finisher_name,version FROM handovers ORDER BY completed_at IS NOT NULL,created_at DESC LIMIT 1000',
      'SELECT * FROM internal_notes ORDER BY created_at DESC LIMIT 500',
-     'SELECT id,handover_id,action,actor_id,actor_name,before_data,after_data,reason,created_at FROM handover_revisions ORDER BY created_at DESC LIMIT 500'
+     'SELECT id,handover_id,action,actor_id,actor_name,before_data,after_data,reason,created_at FROM handover_revisions ORDER BY created_at DESC LIMIT 500',
+     `SELECT t.id AS teacher_id,m.content AS latest_content,m.created_at AS latest_at,m.direction AS latest_direction,
+       (SELECT id FROM messages WHERE teacher_id=t.id AND direction='in' ORDER BY rowid DESC LIMIT 1) AS latest_inbound_id,
+       (SELECT count(*) FROM messages WHERE teacher_id=t.id AND direction='in' AND withdrawn=0 AND rowid>coalesce(v.last_seen_seq,0)) AS unread_count
+      FROM teachers t LEFT JOIN messages m ON m.rowid=(SELECT max(rowid) FROM messages WHERE teacher_id=t.id)
+      LEFT JOIN conversation_views v ON v.teacher_id=t.id AND v.admin_id=? WHERE t.active=1`,
+     `SELECT p.teacher_id,p.admin_id,a.display_name,p.expires_at FROM reply_presence p JOIN admins a ON a.id=p.admin_id WHERE a.active=1 AND p.expires_at>?`
+
     ];
-    const results=await env.DB.batch(queries.map(q=>env.DB.prepare(q)));
+    const results=await env.DB.batch(queries.map((q,i)=>i===10?env.DB.prepare(q).bind(s.id):i===11?env.DB.prepare(q).bind(unix()):env.DB.prepare(q)));
     const data=Object.fromEntries(names.map((name,i)=>[name,results[i].results]));
     for(const name of ['teachers','staff'])for(const row of data[name]as any[])row.active=!!row.active;
     for(const row of data.handover_revisions as any[]){row.before_data=row.before_data?JSON.parse(row.before_data):null;row.after_data=JSON.parse(row.after_data);}

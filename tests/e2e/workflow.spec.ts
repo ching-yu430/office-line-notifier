@@ -10,21 +10,16 @@ test('桌面：綁定、通知、教師回覆與結案',async({page})=>{
  await page.locator('.teacher-option').filter({hasText:'示範教師乙'}).getByRole('checkbox').check();
  await page.getByRole('button',{name:'包裹通知',exact:true}).click();await page.getByRole('button',{name:'預覽通知'}).click();await expect(page.getByRole('dialog')).toContainText('示範教師乙');await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
  await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師乙'}).click();await page.getByLabel('模擬老師回覆').fill('我下班前會去領取，謝謝！');await page.getByRole('button',{name:'模擬接收'}).click();await expect(page.locator('.messages')).toContainText('我下班前會去領取，謝謝！');
- await page.getByLabel('回覆老師',{exact:true}).fill('好的，辦公室等您。');await page.getByRole('button',{name:'回覆',exact:true}).click();await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();await expect(page.locator('.messages')).toContainText('好的，辦公室等您。');
+ await page.getByLabel('回覆老師',{exact:true}).fill('好的，辦公室等您。');await page.getByRole('button',{name:'送出',exact:true}).click();await expect(page.locator('.messages')).toContainText('好的，辦公室等您。');
  await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await page.getByLabel('教師篩選').selectOption({label:'示範教師乙'});await page.getByLabel('更新示範教師乙處理狀態').first().selectOption('已完成');await expect(page.getByLabel('更新示範教師乙處理狀態').first()).toHaveValue('已完成');
 });
 test('一般行政無法管理教師或產生綁定碼',async({page})=>{await page.goto('/');await page.getByRole('button',{name:'切換為行政人員'}).click();await page.getByRole('button',{name:'教師名單',exact:true}).click();await expect(page.getByRole('button',{name:'新增教師'})).toHaveCount(0);await expect(page.getByRole('button',{name:'產生綁定碼'})).toHaveCount(0);});
-test('回覆預設完成對話，可保留待回覆；預覽期間的新訊息不被結案，領取狀態保持',async({page})=>{
- await page.goto('/');await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師甲'}).click();
- const reply=async(text:string)=>{await page.getByLabel('回覆老師',{exact:true}).fill(text);await page.getByRole('button',{name:'回覆',exact:true}).click();await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);};
- await expect(page.getByLabel('回覆後完成對話')).toBeChecked();await reply('完成這次對話');await expect(page.getByLabel('對話處理狀態')).toHaveValue('已完成');
+test('直接回覆自動改為已回覆，老師再傳訊息重新待回覆，包裹保持待領取',async({page})=>{
+ await page.goto('/');await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();
+ await expect(page.getByLabel('回覆後完成對話')).toHaveCount(0);await page.getByLabel('回覆老師',{exact:true}).fill('辦公室回覆');await page.getByRole('button',{name:'送出',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByLabel('對話處理狀態')).toHaveValue('已完成');await expect(page.getByLabel('對話處理狀態').locator('option:checked')).toHaveText('已回覆');
  await page.getByLabel('模擬老師回覆').fill('另一個問題');await page.getByRole('button',{name:'模擬接收'}).click();await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
- await page.getByLabel('回覆後完成對話').uncheck();await reply('仍在確認');await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
- await page.getByLabel('回覆後完成對話').check();await page.getByLabel('回覆老師',{exact:true}).fill('回答先前問題');await page.getByRole('button',{name:'回覆',exact:true}).click();
- await page.evaluate(()=>{const data=JSON.parse(localStorage.getItem('office-line-demo-v1')!);data.messages.push({id:crypto.randomUUID(),teacher_id:'demo-1',direction:'in',content:'預覽時新增的問題',created_at:new Date().toISOString()});data.conversations.find((c:any)=>c.teacher_id==='demo-1').status='待回覆';localStorage.setItem('office-line-demo-v1',JSON.stringify(data));window.dispatchEvent(new Event('office-refresh'));});
- await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
- await page.getByRole('button',{name:'通知紀錄',exact:true}).click();const parcel=page.getByRole('row').filter({hasText:'您的包裹已送達辦公室'});await expect(parcel).toContainText('待領取');await expect(page.locator('body')).not.toContainText('API 已接受');
- await page.reload();await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師甲'}).click();await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
+ await expect(page.locator('.chat-pickups')).toContainText('包裹通知');await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await expect(page.getByRole('row').filter({hasText:'您的包裹已送達辦公室'})).toContainText('待領取');await expect(page.locator('body')).not.toContainText('API 已接受');
+ await page.reload();await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
 });
 test('手機：主要頁面可操作且無整頁水平溢出',async({page})=>{await page.setViewportSize({width:390,height:844});await page.goto('/');await expect(page.getByRole('heading',{name:'值班工作台'})).toBeVisible();expect((await page.locator('nav').boundingBox())!.height).toBeLessThan(100);for(const name of ['教師名單','發送通知','訊息中心','通知紀錄','系統管理']){await page.getByRole('button',{name:name==='訊息中心'?/^訊息中心/:name,exact:name!=='訊息中心'}).click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}});
 test('值班工作台：快捷通知與領件確認',async({page})=>{
@@ -34,8 +29,8 @@ test('值班工作台：快捷通知與領件確認',async({page})=>{
  await expect.poll(()=>logo.evaluate((el:HTMLImageElement)=>el.naturalWidth)).toBe(3302);
  expect(await logo.evaluate(el=>getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
  await page.getByRole('button',{name:'信件通知'}).click();
- await expect(page.locator('textarea')).toHaveValue('您的信件已送達辦公室，請撥空領取。');
- await page.getByRole('button',{name:'值班工作台',exact:true}).click();
+ await expect(page.getByRole('dialog').locator('textarea')).toHaveValue('您的信件已送達辦公室，請撥空領取。');
+ await page.getByRole('button',{name:'關閉',exact:true}).click();
  await page.getByRole('button',{name:'登記已領取',exact:true}).first().click();
  await expect(page.getByRole('dialog')).toContainText('示範教師甲');
  await page.getByRole('button',{name:'確認已領取',exact:true}).click();

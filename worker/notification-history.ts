@@ -1,7 +1,7 @@
 import {type Env,type Actor,HttpError,id,text} from './types';
 import {limit} from './auth';
 
-function boundary(value:string,end=false){
+export function boundary(value:string,end=false){
  if(!/^\d{4}-\d{2}-\d{2}$/.test(value))throw new HttpError(400,'日期格式錯誤');
  const calendar=new Date(value+'T00:00:00Z');
  if(!Number.isFinite(calendar.getTime())||calendar.toISOString().slice(0,10)!==value)throw new HttpError(400,'日期不存在');

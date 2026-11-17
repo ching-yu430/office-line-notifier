@@ -1,15 +1,24 @@
-import {useEffect,useState,type ReactNode} from 'react';
-import {ChevronRight} from 'lucide-react';
+import {useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
+import {ChevronRight,Search} from 'lucide-react';
 import {filterDatedRecords,taipeiDay,type HistoryPeriod} from './handover-history';
-type Props<T>={title:string;className:string;items:T[];timestamp:(item:T)=>string|null;renderItem:(item:T)=>ReactNode;label:string;dateLabel:string;emptyText:string;defaultOpen?:boolean};
-export function RecordHistory<T>({title,className,items,timestamp,renderItem,label,dateLabel,emptyText,defaultOpen=false}:Props<T>){
- const [open,setOpen]=useState(defaultOpen),[period,setPeriod]=useState<HistoryPeriod>('today'),[date,setDate]=useState(()=>taipeiDay(new Date())),[page,setPage]=useState(1);
- useEffect(()=>{setPage(1);},[period,date]);
- const filtered=filterDatedRecords(items,timestamp,period,date),pages=Math.max(1,Math.ceil(filtered.length/5)),currentPage=Math.min(page,pages);
+import {command,mock} from './api';
+import type {PageMemory} from './page-memory';
+type Props<T>={title:string;className:string;items:T[];timestamp:(item:T)=>string|null;renderItem:(item:T)=>ReactNode;label:string;dateLabel:string;emptyText:string;defaultOpen?:boolean;searchText?:(item:T)=>string;memory?:PageMemory;remoteHandovers?:boolean};
+export function RecordHistory<T>({title,className,items,timestamp,renderItem,label,dateLabel,emptyText,defaultOpen=false,searchText,memory,remoteHandovers=false}:Props<T>){
+ const saved=useRef(memory?.get(className)||{}).current,list=useRef<HTMLDivElement>(null),mounted=useRef(false),restore=useRef(true);
+ const [open,setOpen]=useState(saved.open??defaultOpen),[period,setPeriod]=useState<HistoryPeriod>(saved.period||'today'),[date,setDate]=useState(saved.date||taipeiDay(new Date())),[page,setPage]=useState(saved.page||1),[query,setQuery]=useState(saved.query||''),[result,setResult]=useState<{items:T[];total:number;pages:number;page:number;key:string}|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[refresh,setRefresh]=useState(0);
+ useEffect(()=>{if(mounted.current){setPage(1);if(list.current)list.current.scrollTop=0;}mounted.current=true;},[period,date,query]);
+ useEffect(()=>{memory?.set(className,{...memory.get(className),open,period,date,page,query});},[open,period,date,page,query,memory,className]);
+ useEffect(()=>{const changed=()=>setRefresh(n=>n+1);window.addEventListener('office-handovers-changed',changed);return()=>window.removeEventListener('office-handovers-changed',changed);},[]);
+ const remote=remoteHandovers&&!mock,key=JSON.stringify({period,date,page,query}),live=items.map((item:any)=>[item.id,item.version,timestamp(item)].join(':')).join('|');
+ useEffect(()=>{if(!remote||!open)return;let cancelled=false;setLoading(true);setError('');const timer=setTimeout(()=>{void command('handover_history',JSON.parse(key)).then(r=>{if(!cancelled)setResult({...r,key});}).catch(e=>{if(!cancelled)setError((e as Error).message);}).finally(()=>{if(!cancelled)setLoading(false);});},200);return()=>{cancelled=true;clearTimeout(timer);};},[remote,open,key,live,refresh]);
+ useLayoutEffect(()=>{if(open&&!loading&&restore.current&&list.current&&(!remote||result?.key===key)){list.current.scrollTop=saved.scroll||0;restore.current=false;}},[open,loading,result,key,remote]);
+ const filtered=filterDatedRecords(items,timestamp,period,date).filter(item=>!searchText||searchText(item).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+ const count=remote?(result?.key===key?result.total:0):filtered.length,pages=remote?(result?.key===key?result.pages:1):Math.max(1,Math.ceil(count/5)),currentPage=remote?(result?.key===key?result.page:1):Math.min(page,pages),rows=remote?(result?.key===key?result.items:[]):filtered.slice((currentPage-1)*5,currentPage*5);
  return <details className={`record-history ${className}`} open={open} onToggle={e=>setOpen(e.currentTarget.open)}>
   <summary><ChevronRight size={17}/><span>{title}</span><span className="count">{items.length}</span></summary>
-  <div className="history-filters"><div className="history-periods" role="group" aria-label={`${label}日期篩選`}>{([['today','今日'],['week','近一週'],['date','特定日期']] as const).map(([value,text])=><button key={value} type="button" aria-pressed={period===value} onClick={()=>setPeriod(value)}>{text}</button>)}</div>{period==='date'&&<label className="history-date">日期<input type="date" aria-label={`${label}日期`} value={date} onChange={e=>setDate(e.target.value)}/></label>}<small>{filtered.length} 筆 · 依{dateLabel}篩選（台灣時間）</small></div>
-  <div className="history-list" role="region" tabIndex={0} aria-label={`${title}清單`}>{filtered.slice((currentPage-1)*5,currentPage*5).map(renderItem)}{!filtered.length&&<div className="empty">{emptyText}</div>}</div>
-  {filtered.length>5&&<div className="history-pagination"><button className="outline" aria-label={`上一頁${label}`} disabled={currentPage===1} onClick={()=>setPage(currentPage-1)}>上一頁</button><span>{currentPage} / {pages}</span><button className="outline" aria-label={`下一頁${label}`} disabled={currentPage===pages} onClick={()=>setPage(currentPage+1)}>下一頁</button></div>}
+  <div className="history-filters"><div className="history-periods" role="group" aria-label={`${label}日期篩選`}>{([['today','今日'],['week','近一週'],['date','特定日期']] as const).map(([value,text])=><button key={value} type="button" aria-pressed={period===value} onClick={()=>setPeriod(value)}>{text}</button>)}</div>{period==='date'&&<label className="history-date">日期<input type="date" aria-label={`${label}日期`} value={date} onChange={e=>setDate(e.target.value)}/></label>}{searchText&&<div className="search history-search"><Search size={16}/><input maxLength={200} aria-label={`搜尋${label}`} placeholder="搜尋內容、交接人、完成人" value={query} onChange={e=>setQuery(e.target.value)}/></div>}<small>{loading?'正在查詢…':`${count} 筆 · 依${dateLabel}篩選（台灣時間）`}</small></div>
+  <div className="history-list" ref={list} onScroll={e=>{if(!loading&&!restore.current)memory?.set(className,{...memory.get(className),scroll:e.currentTarget.scrollTop});}} role="region" tabIndex={0} aria-label={`${title}清單`}>{loading?<div className="empty" role="status">正在載入紀錄…</div>:error?<div className="error" role="alert">{error}</div>:<>{rows.map(renderItem)}{!count&&<div className="empty">{query?'找不到符合條件的交接紀錄':emptyText}</div>}</>}</div>
+  {count>5&&<div className="history-pagination"><button className="outline" aria-label={`上一頁${label}`} disabled={loading||currentPage===1} onClick={()=>setPage(currentPage-1)}>上一頁</button><span>{currentPage} / {pages}</span><button className="outline" aria-label={`下一頁${label}`} disabled={loading||currentPage===pages} onClick={()=>setPage(currentPage+1)}>下一頁</button></div>}
  </details>;
 }

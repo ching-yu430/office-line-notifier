@@ -39,9 +39,9 @@ const now=()=>new Date().toISOString();
 const defaults:Data={internal_notes:[],handover_revisions:[],handovers:[],conversations:[],teachers:[{id:'demo-1',name:'示範教師甲',department:'教務處',notes:'虛構示範資料',active:true,bound_at:now(),last_notified_at:now()},{id:'demo-2',name:'示範教師乙',department:'學務處',notes:'虛構示範資料',active:true,bound_at:null,last_notified_at:null},{id:'demo-3',name:'示範教師丙',department:'總務處',notes:'虛構示範資料',active:true,bound_at:now(),last_notified_at:now()}],notifications:[{id:'n1',teacher_id:'demo-1',kind:'parcel',content:'您的包裹已送達辦公室，請撥空領取。',important:false,send_status:'accepted',status:'待領取',created_at:now(),sender_id:'demo-admin'},{id:'n2',teacher_id:'demo-3',kind:'contact',content:'辦公室有事項需要與您聯繫。',important:true,send_status:'accepted',status:'待回覆',created_at:now(),sender_id:'demo-admin'}],messages:[{id:'m1',teacher_id:'demo-1',direction:'out',content:'您的包裹已送達辦公室，請撥空領取。',created_at:now()},{id:'m2',teacher_id:'demo-1',direction:'in',content:'謝謝通知，我會在午休時間到辦公室領取。',created_at:now()}],staff:[{id:'demo-admin',display_name:'示範管理員',role:'admin',active:true},{id:'demo-staff',display_name:'示範行政人員',role:'staff',active:true}],templates:[{kind:'mail',label:'實體信件',content:'您的信件已送達辦公室，請撥空領取。'},{kind:'parcel',label:'包裹通知',content:'您的包裹已送達辦公室，請撥空領取。'},{kind:'contact',label:'行政聯絡',content:'辦公室有事項需要與您聯繫。'},{kind:'custom',label:'自訂訊息',content:''}],audit_logs:[]};
 const storageKey='office-line-demo-v1';
 function initialDemo():Data{if(mock){try{return JSON.parse(localStorage.getItem(storageKey)||'null')||structuredClone(defaults);}catch{}}return structuredClone(defaults);}
-type DemoData=Data&{views?:{teacher_id:string;admin_id:string;sequence:number}[];undo_actions?:{id:string;actor_id:string;type:'notification'|'handover';before:any;after_version:number;expires_at:number;used?:boolean}[]};
+type DemoData=Data&{operation_requests?:Record<string,{fingerprint:string;actor:string}>;views?:{teacher_id:string;admin_id:string;sequence:number}[];undo_actions?:{id:string;actor_id:string;type:'notification'|'handover';before:any;after_version:number;expires_at:number;used?:boolean}[]};
 let demo:DemoData=initialDemo();
-function normalize(){demo.views ||= [];demo.undo_actions ||= [];demo.presence ||= [];for(const n of demo.notifications)n.version ??=1;demo.conversations ||= [];demo.handovers ||= [];demo.internal_notes ||= [];demo.handover_revisions ||= [];for(const h of demo.handovers){h.handover_name ??=h.creator_name;h.finisher_name ??=h.completed_name;h.version ??=1;}}
+function normalize(){demo.operation_requests ||= {};demo.views ||= [];demo.undo_actions ||= [];demo.presence ||= [];for(const n of demo.notifications)n.version ??=1;demo.conversations ||= [];demo.handovers ||= [];demo.internal_notes ||= [];demo.handover_revisions ||= [];for(const h of demo.handovers){h.handover_name ??=h.creator_name;h.finisher_name ??=h.completed_name;h.version ??=1;}}
 normalize();
 function readLatestDemo(){const saved=localStorage.getItem(storageKey);if(saved)demo=JSON.parse(saved);normalize();}
 let demoRole='admin';
@@ -72,9 +72,25 @@ export async function command(action:string,payload:any={}):Promise<any>{
  const t=demo.teachers.find(t=>t.id===payload.teacher_id);
  let result:any={};
  const actor=demoRole==='admin'?'demo-admin':'demo-staff',actorName=demo.staff.find(s=>s.id===actor)?.display_name||'行政人員';
+ if(action==='notification_preflight')return {pending:demo.teachers.filter(t=>payload.teacher_ids.includes(t.id)).map(t=>({teacher_id:t.id,name:t.name,count:demo.notifications.filter(n=>n.teacher_id===t.id&&['mail','parcel'].includes(n.kind)&&n.status==='待領取').length})).filter(t=>t.count)};
+ if(action==='pickup_many'||action==='undo_many'){
+  const fingerprint=JSON.stringify({...payload,action}),old=demo.operation_requests![payload.request_id];
+  if(old){if(old.fingerprint!==fingerprint||old.actor!==actor)throw Error('重複請求內容不一致');return {already_applied:true};}
+  if(action==='pickup_many'){
+   if(!Array.isArray(payload.items)||!payload.items.length||payload.items.length>100||new Set(payload.items.map((n:any)=>n.id)).size!==payload.items.length)throw Error('領件資料格式錯誤');
+   const notices=payload.items.map((item:any)=>{const n=demo.notifications.find(n=>n.id===item.id);if(!n||n.teacher_id!==payload.teacher_id||!['mail','parcel'].includes(n.kind)||n.status!=='待領取'||n.version!==item.expected_version)throw Error('領件紀錄已變更，請重新確認');return n;}) as Notice[];
+   const expires_at=Math.floor(Date.now()/1000)+60,ids=notices.map(n=>{const before=structuredClone(n),id=crypto.randomUUID();Object.assign(n,{status:'已完成',completed_at:now(),completed_by:actor,version:n.version!+1});demo.undo_actions!.push({id,actor_id:actor,type:'notification',before,after_version:n.version!,expires_at});return id;});
+   result={undo:{id:payload.request_id,ids,expires_at}};
+  }else{
+   if(!Array.isArray(payload.ids)||!payload.ids.length||payload.ids.length>100||new Set(payload.ids).size!==payload.ids.length)throw Error('復原資料格式錯誤');
+   const undos=payload.ids.map((id:string)=>{const u=demo.undo_actions!.find(u=>u.id===id&&u.actor_id===actor&&u.type==='notification');const n=demo.notifications.find(n=>n.id===u?.before.id);if(!u||!n||u.used||u.expires_at<=Date.now()/1000||n.version!==u.after_version)throw Error('紀錄已更新、逾期或已復原，請查看最新紀錄');return {u,n};});
+   for(const {u,n} of undos){Object.assign(n,u.before,{version:u.after_version+1});u.used=true;}
+  }
+  demo.operation_requests![payload.request_id]={fingerprint,actor};demo.audit_logs.unshift({id:crypto.randomUUID(),actor_id:actor,action,teacher_id:payload.teacher_id,created_at:now()});persist();return result;
+ }
  const revision=(h:Handover,before:Handover|null)=>demo.handover_revisions.unshift({id:crypto.randomUUID(),handover_id:h.id,action,actor_id:actor,actor_name:actorName,before_data:before,after_data:structuredClone(h),reason:payload.reason?.trim()||null,created_at:now()});
  if(action==='teacher_save'){if(t)Object.assign(t,{name:payload.name,department:payload.department,notes:payload.notes,active:payload.active});else demo.teachers.push({id:crypto.randomUUID(),...payload,bound_at:null,last_notified_at:null});}
- if(action==='issue_code'){if(!t?.active||t.bound_at)throw Error('教師已綁定或已停用');for(const [key,v] of codes)if(v.teacher_id===t.id)codes.delete(key);const code=Array.from(crypto.getRandomValues(new Uint8Array(12)),n=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[n%32]).join('');codes.set(code,{teacher_id:t.id,expires:Date.now()+7*86400000});result={code,expires_at:new Date(Date.now()+7*86400000).toISOString()};}
+ if(action==='issue_code'){if(!t?.active||t.bound_at)throw Error('教師已綁定或已停用');for(const [key,v] of codes)if(v.teacher_id===t.id)codes.delete(key);const code=Array.from(crypto.getRandomValues(new Uint8Array(12)),n=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[n%32]).join('');codes.set(code,{teacher_id:t.id,expires:Date.now()+7*86400000});result={code,binding_link:'https://example.invalid/line-binding?code='+encodeURIComponent(code),expires_at:new Date(Date.now()+7*86400000).toISOString()};}
  if(action==='unbind'&&t){t.bound_at=null;for(const [key,v]of codes)if(v.teacher_id===t.id)codes.delete(key);}
  if(action==='mock_bind'){const c=codes.get(payload.code.trim().toUpperCase().replace(/[ -]/g,''));if(!c||c.expires<=Date.now())throw Error('綁定碼無效或已過期');const teacher=demo.teachers.find(t=>t.id===c.teacher_id)!;if(!teacher.active||teacher.bound_at)throw Error('無法重複綁定');teacher.bound_at=now();codes.delete(payload.code.trim().toUpperCase().replace(/[ -]/g,''));}
  if(action==='conversation_view'){
@@ -91,6 +107,7 @@ export async function command(action:string,payload:any={}):Promise<any>{
   if(undo.type==='handover'){revision(current as Handover,before as Handover);demo.handover_revisions[0].action='handover_undo';}
  }
  if(action==='send'){
+ if(['mail','parcel'].includes(payload.kind)&&!payload.duplicate_confirmed&&!demo.notifications.some((n:any)=>n.request_id===payload.request_id)&&demo.notifications.some(n=>payload.teacher_ids.includes(n.teacher_id)&&['mail','parcel'].includes(n.kind)&&n.status==='待領取'))throw new ApiError(409,'教師已有待領取紀錄，請確認是否為新件或仍需再次通知','DUPLICATE_NOTICE');
  for(const id of payload.teacher_ids){const teacher=demo.teachers.find(t=>t.id===id);if(!teacher?.active||!teacher.bound_at)throw Error('教師尚未綁定或已停用');}
  for(const id of payload.teacher_ids){
   if(demo.notifications.some((n:any)=>n.request_id===payload.request_id&&n.teacher_id===id))continue;

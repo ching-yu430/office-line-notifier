@@ -12,12 +12,13 @@ let mf:Miniflare,db:D1Database;
 const origin='http://localhost:5173',authPepper=randomBytes(32).toString('hex'),bindingPepper=randomBytes(32).toString('hex'),lineSecret=randomBytes(32).toString('hex');
 const credentials={username:'test-'+randomUUID(),password:randomBytes(24).toString('hex')};
 let cookie='',csrf='',staffCookie='',staffCsrf='',timeOffset=0;
-let calls:{url:string;body:any;retry:string|null}[]=[],lineStatus=200,lineThrows=false;
+let calls:{url:string;body:any;retry:string|null}[]=[],lineStatus=200,lineThrows=false,botStatus=200;
 let duringPush:(()=>Promise<void>)|undefined;
 const now=()=>new Date(Date.now()+timeOffset).toISOString();
 beforeAll(async()=>{
  const output=await build({entryPoints:['worker/index.ts'],bundle:true,format:'esm',platform:'browser',write:false});
  mf=new Miniflare({modules:true,script:productionCryptoLimit+output.outputFiles[0].text,compatibilityDate:'2026-07-01',d1Databases:['DB'],bindings:{ALLOWED_ORIGIN:origin,COOKIE_SECURE:'false',AUTH_PEPPER:authPepper,BINDING_PEPPER:bindingPepper,LINE_CHANNEL_SECRET:lineSecret,LINE_CHANNEL_ACCESS_TOKEN:randomBytes(32).toString('hex'),LINE_SEND_ENABLED:'true'},outboundService:async(req:any)=>{
+  if(req.url.endsWith('/v2/bot/info'))return new Response(JSON.stringify({basicId:'@office-test'}),{status:botStatus});
   calls.push({url:req.url,body:await req.json(),retry:req.headers.get('x-line-retry-key')});if(lineThrows)throw Error('simulated transport failure');if(req.url.endsWith('/message/push'))await duringPush?.();return new Response('{}',{status:lineStatus});
  }});
  db=await mf.getD1Database('DB') as unknown as D1Database;
@@ -26,7 +27,7 @@ beforeAll(async()=>{
 },60000);
 afterAll(async()=>{await mf?.dispose();});
 beforeEach(async()=>{
- calls=[];lineStatus=200;lineThrows=false;timeOffset=0;duringPush=undefined;
+ calls=[];lineStatus=200;lineThrows=false;botStatus=200;timeOffset=0;duringPush=undefined;
  for(const name of ['undo_actions','reply_presence','conversation_views','handover_revisions','audit_logs','internal_notes','handovers','messages','conversations','notifications','send_requests','unsend_tombstones','webhook_events','binding_codes','teachers','sessions','rate_limits','admins'])await db.prepare(`DELETE FROM ${name}`).run();
  const hash=await passwordHash(credentials.password,authPepper);
  await db.prepare('INSERT INTO admins VALUES(?,?,?,?,?,?,?,?)').bind('test-admin',credentials.username,'測試管理員',hash,'admin',1,now(),now()).run();
@@ -320,4 +321,67 @@ it('維護修復保留原帳號與教師，撤銷 Session 並恢復登入',async
 it('資料庫未套用完整結構時回安全的明確提示，不洩漏 SQL',async()=>{
  await db.prepare('ALTER TABLE rate_limits RENAME TO temporary_rate_limits').run();
  try{const response=await request('/login',credentials,'','');expect(response.status).toBe(503);const body:any=await response.json();expect(body.code).toBe('DATABASE_SCHEMA_MISSING');expect(JSON.stringify(body)).not.toContain('SELECT');}finally{await db.prepare('ALTER TABLE temporary_rate_limits RENAME TO rate_limits').run();}
+});
+
+it('個人綁定連結使用官方帳號識別並預填同一個一次性碼，失敗時可手動綁定',async()=>{
+ const tid=await teacher(),r=await cmd('issue_code',{teacher_id:tid}),body:any=await r.json();
+ expect(body.binding_link).toBe('https://line.me/R/oaMessage/%40office-test/?'+body.code);
+ expect(JSON.stringify(body)).not.toContain(bindingPepper);expect((await get('SELECT code_hash FROM binding_codes WHERE teacher_id=?',tid)).code_hash).not.toBe(body.code);
+ const other=await teacher();botStatus=401;const fallback:any=await(await cmd('issue_code',{teacher_id:other})).json();expect(fallback.binding_link).toBeNull();expect(fallback.code).toHaveLength(12);
+ expect((await hook([ev(body.code)])).status).toBe(200);expect((await get('SELECT bound_at FROM teachers WHERE id=?',tid)).bound_at).toBeTruthy();
+});
+async function pickupNotices(tid:string,count=2){
+ for(let i=0;i<count;i++){const r=await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:i%2?'mail':'parcel',content:'虛構領件 '+i,duplicate_confirmed:true});expect(r.status).toBe(200);}
+ return (await db.prepare('SELECT id,version FROM notifications WHERE teacher_id=? ORDER BY id').bind(tid).all<any>()).results;
+}
+it('多筆領件驗證相同教師及版本，保留完成經辦、逐筆稽核並可整批一次復原',async()=>{
+ const tid=await teacher(true),items=(await pickupNotices(tid)).map(n=>({id:n.id,expected_version:n.version})),payload={request_id:randomUUID(),teacher_id:tid,items};calls=[];
+ const r=await cmd('pickup_many',payload,staffCookie,staffCsrf);expect(r.status).toBe(200);const body:any=await r.json();expect(body.undo.ids).toHaveLength(2);
+ expect((await get("SELECT count(*) AS n FROM notifications WHERE status='已完成' AND completed_by='test-staff' AND completed_at IS NOT NULL")).n).toBe(2);
+ expect((await get("SELECT count(*) AS n FROM audit_logs WHERE action='pickup_many'")).n).toBe(2);expect(calls).toHaveLength(0);
+ expect((await cmd('pickup_many',payload,staffCookie,staffCsrf)).status).toBe(200);expect((await get('SELECT count(*) AS n FROM undo_actions')).n).toBe(2);
+ expect((await cmd('undo_many',{request_id:randomUUID(),ids:body.undo.ids})).status).toBe(409);
+ const undo={request_id:randomUUID(),ids:body.undo.ids};expect((await cmd('undo_many',undo,staffCookie,staffCsrf)).status).toBe(200);expect((await cmd('undo_many',undo,staffCookie,staffCsrf)).status).toBe(200);
+ expect((await get("SELECT count(*) AS n FROM notifications WHERE status='待領取' AND completed_at IS NULL AND completed_by IS NULL")).n).toBe(2);
+ expect((await cmd('pickup_many',payload,staffCookie,staffCsrf)).status).toBe(200);expect((await get("SELECT count(*) AS n FROM notifications WHERE status='已完成'")).n).toBe(0);
+});
+it('多筆領件任一筆過時、跨教師或格式異常時整批不變更，未登入與 CSRF 仍拒絕',async()=>{
+ const tid=await teacher(true),other=await teacher(true),notices=await pickupNotices(tid),make=()=>({request_id:randomUUID(),teacher_id:tid,items:notices.map(n=>({id:n.id,expected_version:n.version}))});
+ const stale=make();stale.items[1].expected_version=999;expect((await cmd('pickup_many',stale)).status).toBe(409);
+ expect((await cmd('pickup_many',{...make(),teacher_id:other})).status).toBe(409);expect((await cmd('pickup_many',{...make(),items:[make().items[0],make().items[0]]})).status).toBe(400);
+ expect((await cmd('pickup_many',make(),'','')).status).toBe(401);expect((await cmd('pickup_many',make(),cookie,'wrong')).status).toBe(403);
+ expect((await get("SELECT count(*) AS n FROM notifications WHERE status='待領取'")).n).toBe(2);expect((await get('SELECT count(*) AS n FROM undo_actions')).n).toBe(0);
+});
+it('整批復原任一筆被同事更新或逾期便全部拒絕，不覆蓋其他資料',async()=>{
+ const tid=await teacher(true),items=(await pickupNotices(tid)).map(n=>({id:n.id,expected_version:n.version}));
+ const r:any=await(await cmd('pickup_many',{request_id:randomUUID(),teacher_id:tid,items})).json();
+ await cmd('complete',{id:items[0].id,status:'待回覆',expected_version:2});expect((await cmd('undo_many',{request_id:randomUUID(),ids:r.undo.ids})).status).toBe(409);
+ expect((await get("SELECT status FROM notifications WHERE id=?",items[1].id)).status).toBe('已完成');expect((await get('SELECT count(*) AS n FROM undo_actions WHERE used_at IS NOT NULL')).n).toBe(0);
+ await db.prepare('UPDATE undo_actions SET expires_at=0').run();expect((await cmd('undo_many',{request_id:randomUUID(),ids:[r.undo.ids[1]]})).status).toBe(409);
+});
+it('已有待領取須明確確認才發新通知；確認後重試不重複，其他聯絡不受影響',async()=>{
+ const tid=await teacher(true);await pickupNotices(tid,1);calls=[];
+ const pre:any=await(await cmd('notification_preflight',{teacher_ids:[tid]})).json();expect(pre.pending[0].count).toBe(1);
+ const payload={request_id:randomUUID(),teacher_ids:[tid],kind:'mail',content:'新信件'};
+ const blocked=await cmd('send',payload);expect(blocked.status).toBe(409);expect((await blocked.json() as any).code).toBe('DUPLICATE_NOTICE');expect(calls).toHaveLength(0);
+ expect((await get('SELECT count(*) AS n FROM notifications')).n).toBe(1);expect(await get('SELECT id FROM send_requests WHERE id=?',payload.request_id)).toBeNull();
+ expect((await cmd('send',{...payload,duplicate_confirmed:true})).status).toBe(200);expect((await cmd('send',{...payload,duplicate_confirmed:true})).status).toBe(200);expect(calls).toHaveLength(1);
+ expect((await cmd('send',{request_id:randomUUID(),teacher_ids:[tid],kind:'contact',content:'其他行政聯絡'})).status).toBe(200);
+});
+it('兩位行政同時發送相同教師的新領件通知時，未確認的第二批被擋下',async()=>{
+ const tid=await teacher(true),send=()=>({request_id:randomUUID(),teacher_ids:[tid],kind:'parcel',content:'同時測試'});
+ const results=await Promise.all([cmd('send',send()),cmd('send',send(),staffCookie,staffCsrf)]);expect(results.map(r=>r.status).sort()).toEqual([200,409]);expect((await get('SELECT count(*) AS n FROM notifications')).n).toBe(1);
+});
+it('交接搜尋查詢完整資料庫，依台灣完成日期、交接人及完成人篩選並驗證權限格式',async()=>{
+ const now=new Date().toISOString();await db.prepare(`WITH RECURSIVE seq(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<1010) INSERT INTO handovers(id,content,created_by,creator_name,handover_name,created_at,completed_at,completed_by,finisher_name) SELECT 'history-'||n,CASE WHEN n=1 THEN '較早交接100%_' ELSE '一般交接'||n END,'test-admin','管理員',CASE WHEN n=1 THEN '交接甲' ELSE '其他交接人' END,?,CASE WHEN n=1 THEN '2025-11-16T16:01:00.000Z' ELSE ? END,'test-admin',CASE WHEN n=1 THEN '完成乙' ELSE '其他完成人' END FROM seq`).bind(now,now).run();
+ for(const query of ['100%_','交接甲','完成乙']){const r=await cmd('handover_history',{page:1,period:'date',date:'2025-11-17',query},staffCookie,staffCsrf);expect(r.status).toBe(200);const body:any=await r.json();expect(body.total).toBe(1);expect(body.items[0].id).toBe('history-1');}
+ const page:any=await(await cmd('handover_history',{page:2,period:'today'})).json();expect(page.items).toHaveLength(5);expect(page.total).toBe(1009);
+ expect((await cmd('handover_history',{page:1,period:'date',date:'2026-02-30'})).status).toBe(400);expect((await cmd('handover_history',{page:1,period:'today'},'','')).status).toBe(401);
+});
+it('一百筆領件與復原使用固定數量查詢，不超過 D1 批次參數上限',async()=>{
+ const tid=await teacher(true),now=new Date().toISOString();
+ await db.prepare(`WITH RECURSIVE seq(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<100) INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,send_status,status,created_at,sent_at) SELECT 'bulk-pickup-'||n,'bulk-request-'||n,?,'mail','虛構百筆測試','test-admin',1,'bulk-retry-'||n,'accepted','待領取',?,? FROM seq`).bind(tid,now,now).run();
+ const items=Array.from({length:100},(_,i)=>({id:'bulk-pickup-'+(i+1),expected_version:1}));
+ const r=await cmd('pickup_many',{request_id:randomUUID(),teacher_id:tid,items});expect(r.status).toBe(200);const body:any=await r.json();expect(body.undo.ids).toHaveLength(100);expect((await get("SELECT count(*) AS n FROM notifications WHERE status='已完成'")).n).toBe(100);
+ const undo=await cmd('undo_many',{request_id:randomUUID(),ids:body.undo.ids});expect(undo.status).toBe(200);expect((await get("SELECT count(*) AS n FROM notifications WHERE status='待領取'")).n).toBe(100);expect(calls).toHaveLength(0);
 });

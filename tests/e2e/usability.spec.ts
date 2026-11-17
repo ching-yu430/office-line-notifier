@@ -5,7 +5,7 @@ test('快速通知：搜尋、未綁定禁選、選填位置、返回編輯與�
  await page.goto('/');await page.getByRole('button',{name:'包裹通知',exact:true}).click();const modal=page.getByRole('dialog');
  await expect(modal.getByRole('option').filter({hasText:'示範教師乙'})).toBeDisabled();await page.getByLabel('通知對象',{exact:true}).fill('教務處');await modal.getByRole('option').filter({hasText:'示範教師甲'}).click();
  await page.getByLabel('領取位置（選填）').fill('右側置物架');await page.getByRole('button',{name:'預覽通知'}).click();await expect(modal).toContainText('示範教師甲');await expect(modal.locator('.preview-bubble')).toContainText('領取位置：右側置物架');
- await page.getByRole('button',{name:'返回編輯'}).click();await expect(page.getByLabel('領取位置（選填）')).toHaveValue('右側置物架');await page.getByRole('button',{name:'預覽通知'}).click();await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();await expect(modal).toHaveCount(0);
+ await page.getByRole('button',{name:'返回編輯'}).click();await expect(page.getByLabel('領取位置（選填）')).toHaveValue('右側置物架');await page.getByRole('button',{name:'預覽通知'}).click();await page.getByRole('button',{name:'確認仍需通知'}).click();await expect(modal).toHaveCount(0);
  await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await expect(page.getByRole('row').filter({hasText:'領取位置：右側置物架'})).toContainText('待領取');
 });
 

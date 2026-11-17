@@ -1,11 +1,15 @@
-import {useEffect,useState,type ReactNode} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {Search,SlidersHorizontal,RotateCcw,RefreshCw,ChevronLeft,ChevronRight} from 'lucide-react';
 import {loadNoticePage,mock,type Data,type Notice,type NoticePage} from './api';
 import {taipeiDay} from './handover-history';
+import type {PageMemory} from './page-memory';
 const results:Record<string,string>={all:'全部發送結果',attention:'需要檢查',queued:'待發送',sending:'傳送中',accepted:'已送出',failed:'發送失敗',uncertain:'結果未明'};
-export function NotificationHistory({data,initialTeacher='',initialStatus='全部狀態',initialSend='all',renderRows}:{data:Data;initialTeacher?:string;initialStatus?:string;initialSend?:string;renderRows:(rows:Notice[])=>ReactNode}){
- const [query,setQuery]=useState(''),[status,setStatus]=useState(initialStatus),[teacher,setTeacher]=useState(initialTeacher),[send,setSend]=useState(initialSend),[period,setPeriod]=useState('all'),[from,setFrom]=useState(''),[to,setTo]=useState(''),[page,setPage]=useState(1),[refresh,setRefresh]=useState(0),[remote,setRemote]=useState<(NoticePage&{key:string})|null>(null),[loading,setLoading]=useState(!mock),[error,setError]=useState('');
- useEffect(()=>{setPage(1);},[query,status,teacher,send,period,from,to]);
+export function NotificationHistory({data,initialTeacher='',initialStatus='全部狀態',initialSend='all',renderRows,memory}:{data:Data;initialTeacher?:string;initialStatus?:string;initialSend?:string;renderRows:(rows:Notice[])=>ReactNode;memory:PageMemory}){
+ const saved=useRef(memory.get('notifications')||{}).current,scroll=useRef<HTMLDivElement>(null),restore=useRef(true),mounted=useRef(false);
+ const [query,setQuery]=useState(saved.query||''),[status,setStatus]=useState(saved.status||initialStatus),[teacher,setTeacher]=useState(saved.teacher??initialTeacher),[send,setSend]=useState(saved.send||initialSend),[period,setPeriod]=useState(saved.period||'all'),[from,setFrom]=useState(saved.from||''),[to,setTo]=useState(saved.to||''),[page,setPage]=useState(saved.page||1),[refresh,setRefresh]=useState(0),[remote,setRemote]=useState<(NoticePage&{key:string})|null>(null),[loading,setLoading]=useState(!mock),[error,setError]=useState('');
+ useEffect(()=>{if(mounted.current){setPage(1);if(scroll.current)scroll.current.scrollTop=0;}mounted.current=true;},[query,status,teacher,send,period,from,to]);
+ useEffect(()=>{memory.set('notifications',{...memory.get('notifications'),query,status,teacher,send,period,from,to,page});},[query,status,teacher,send,period,from,to,page,memory]);
+ useLayoutEffect(()=>{if(!loading&&restore.current&&scroll.current){scroll.current.scrollTop=saved.scroll||0;window.scrollTo(0,saved.windowScroll||0);restore.current=false;}},[loading,remote]);
  const today=taipeiDay(new Date()),week=taipeiDay(new Date(Date.now()-6*86400000));
  const filtered=data.notifications.filter(n=>{const day=taipeiDay(new Date(n.sent_at||n.created_at)),name=data.teachers.find(t=>t.id===n.teacher_id)?.name||'';return (name+n.content).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())&&(status==='全部狀態'||n.status===status)&&(!teacher||n.teacher_id===teacher)&&(send==='all'||(send==='attention'?['failed','uncertain'].includes(n.send_status):n.send_status===send))&&(period==='all'||(period==='today'?day===today:period==='week'?day>=week&&day<=today:(!from||day>=from)&&(!to||day<=to)));});
  const params=new URLSearchParams({page:String(page)});
@@ -28,7 +32,7 @@ export function NotificationHistory({data,initialTeacher='',initialStatus='全�
   {from&&to&&period==='range'&&from>to&&<p className="error" role="alert">起始日期需早於或等於結束日期。</p>}
   {send==='uncertain'&&<div className="info">結果未明可能已送出，請先核對，避免重複發送。</div>}
   <div className="notice-result-summary"><span>{loading?'正在查詢…':<>符合 <b>{count}</b> 筆</>}</span><span>每頁 10 筆</span></div>
-  <div className="notice-results" aria-busy={loading}>{loading?<div className="empty" role="status">正在載入通知紀錄…</div>:error?<div className="error" role="alert">{error}</div>:renderRows(rows)}</div>
+  <div className="notice-results" ref={scroll} onScroll={e=>{if(!loading&&!restore.current)memory.set('notifications',{...memory.get('notifications'),scroll:e.currentTarget.scrollTop});}} onClickCapture={()=>memory.set('notifications',{...memory.get('notifications'),windowScroll:window.scrollY})} aria-busy={loading}>{loading?<div className="empty" role="status">正在載入通知紀錄…</div>:error?<div className="error" role="alert">{error}</div>:renderRows(rows)}</div>
   {!loading&&!error&&count>10&&<div className="list-pagination"><span>第 {offset+1}–{Math.min(offset+10,count)} 筆，共 {count} 筆</span><div><button className="outline" aria-label="上一頁通知" disabled={current===1} onClick={()=>setPage(current-1)}><ChevronLeft size={15}/>上一頁</button><span>{current} / {pages}</span><button className="outline" aria-label="下一頁通知" disabled={current===pages} onClick={()=>setPage(current+1)}>下一頁<ChevronRight size={15}/></button></div></div>}
   <p className="history-scope">{mock?'展示版使用本機虛構紀錄。':'可查詢資料庫中保存的全部通知，每頁載入 10 筆。'}</p>
  </section>;

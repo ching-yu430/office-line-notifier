@@ -85,7 +85,7 @@ Workers 先驗證原始位元組對應的 LINE HMAC-SHA256，再解析大小受�
 | POST /api/logout | Session＋CSRF，撤銷目前 Session |
 | GET /api/data | Session，經權限過濾的快照；If-None-Match 支援 304 |
 | POST /api/command | Session＋CSRF＋角色，`{action,payload}` 對應既有操作 |
-| POST /api/line/webhook | LINE 原始本文簽章，免行政 Session；只有此路徑免 Origin／CSRF |
+| POST /api/line/webhook | LINE 原始本文簽章，免行政 Session；POST 中只有此路徑免 Origin／CSRF |
 
 所有 API 錯誤為繁體中文 JSON；不輸出 SQL、參數、Token 或 LINE 原始錯誤。Schema 後續調整新增 Migration，不改寫已套用的正式 Migration。
 
@@ -99,3 +99,17 @@ Workers 先驗證原始位元組對應的 LINE HMAC-SHA256，再解析大小受�
 完成領取或交接時，D1 batch 以版本更新並登記原操作人專用的復原資料；只保存需復原的狀態欄位。復原檢查 actor、有效期、未使用、當前版本及 operation token，原子恢復完成欄位、遞增版本並記錄稽核；交接再新增含原完成人的前後版本紀錄。過期復原資料一天後清理，正式稽核不刪除。
 
 畫面僅映射狀態標籤：對話已完成顯示已回覆；信件／包裹已完成顯示已領取；其他通知顯示已處理。資料庫原 enum 與既有 API 值相容。
+
+
+## 介面版本與公開登入指引
+
+`src/version.ts` 為前後端共用版本識別。`GET /api/public-info` 在登入來源檢查之前處理，只接受 GET 並回傳名稱、有效的設定 Origin 與版本；不讀取 D1、不驗證或建立 Session、不公開帳號與金鑰。登入、資料及寫入 API 仍驗證原本的 Origin、Session、CSRF 與角色。前端驗證正式網址是無路徑的 HTTPS Origin 或 localhost HTTP，再顯示正式入口；該頁來源不同時停止送出登入表單。
+
+新版通知紀錄由 D1 進行總數計算、篩選及每頁 10 筆查詢，沒有新增資料庫遷移或放寬權限。前後端需同次上傳；系統管理顯示版本，以協助辨認舊快取或舊正式部署。完整步驟見 [介面與操作修整](REFINEMENT-UPDATE.md)。
+
+
+## 全部通知歷史查詢
+
+`POST /api/notifications/query` 在 Session 與 CSRF 驗證後處理，限定 page、teacher、status、send、query、from、to 字串欄位。搜尋內容最多 200 字，以 `instr` 與綁定參數比對教師姓名／本文，百分比、底線與引號視為一般文字。狀態採白名單，日期驗證真實日曆及台灣時區起訖邊界，頁碼超出範圍回傳最後一頁。查詢每人每分鐘限 90 次，不將搜尋字詞放在 URL，也不記錄本文或原始 SQL。
+
+D1 同批計算符合總數並載入 10 筆，超出頁數時另讀實際最後頁；沒有 500 筆上限。結果明列允許欄位，排除 LINE 身分、binding_version、retry_key、operation_token，並附上該教師最新回覆，避免舊通知依賴全站快照而顯示錯誤的「尚無回覆」。更新舊通知或復原後，以內部事件重新查詢；平時依近期通知變更刷新，其他人對較早紀錄的修改可用「重新載入」核對。

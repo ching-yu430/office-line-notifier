@@ -1,4 +1,5 @@
 import {migrationStatements} from './migrations';
+import {APP_VERSION} from '../src/version';
 import{productionCryptoLimit}from'./production-crypto';
 import type{D1Database}from'@cloudflare/workers-types';
 import{beforeAll,beforeEach,afterAll,it,expect,describe}from'vitest';
@@ -41,6 +42,35 @@ async function issue(tid:string){const r=await cmd('issue_code',{teacher_id:tid}
 function ev(text:string,uid='U'+randomUUID(),eventId=randomUUID(),messageId=randomUUID()){return {webhookEventId:eventId,type:'message',timestamp:Date.now(),source:{type:'user',userId:uid},message:{id:messageId,type:'text',text},replyToken:randomBytes(16).toString('hex')};}
 async function hook(events:any[],raw?:string,sig?:string){const body=raw??JSON.stringify({events});return mf.dispatchFetch('http://localhost/api/line/webhook',{method:'POST',headers:{'x-line-signature':sig??createHmac('sha256',lineSecret).update(body).digest('base64')},body});}
 async function get<T=any>(sql:string,...args:any[]){return db.prepare(sql).bind(...args).first<T>();}
+it('預覽登入指引僅公開正式網址與版本，不暴露憑證且不放寬登入及資料權限',async()=>{
+ const before=await get("SELECT count(*) AS n FROM audit_logs WHERE action='login'");
+ const info=await request('/public-info',undefined,'','',{Origin:'https://preview.example'});expect(info.status).toBe(200);
+ const data:any=await info.json();expect(data.origin).toBe(origin);expect(data.version).toBe(APP_VERSION);expect(Object.keys(data).sort()).toEqual(['name','origin','version']);
+ const serialized=JSON.stringify(data);expect(serialized).not.toContain(authPepper);expect(serialized).not.toContain(bindingPepper);expect(serialized).not.toContain(lineSecret);
+ const denied=await request('/login',credentials,'','',{Origin:'https://preview.example'});expect(denied.status).toBe(403);expect((await denied.json() as any).code).toBe('ORIGIN_NOT_ALLOWED');
+ expect((await request('/data',undefined,cookie,csrf,{Origin:'https://preview.example'})).status).toBe(403);expect((await get("SELECT count(*) AS n FROM audit_logs WHERE action='login'")).n).toBe(before.n);
+});
+it('通知歷史可查超過 500 筆的舊紀錄，支援篩選與真正資料庫分頁且不洩漏 LINE 身分',async()=>{
+ const tid=await teacher(true),t=await get('SELECT * FROM teachers WHERE id=?',tid),recent=new Date().toISOString();
+ await db.prepare(`WITH RECURSIVE seq(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<530)
+ INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,send_status,status,created_at,sent_at)
+ SELECT 'archive-'||n,'archive-request-'||n,?,'mail',CASE WHEN n=1 THEN '較早的通知100%_測試' ELSE '一般通知'||n END,'test-admin',1,'archive-retry-'||n,'accepted','待領取',
+ CASE WHEN n=1 THEN '2025-11-16T16:01:00.000Z' WHEN n=2 THEN '2025-11-16T15:59:00.000Z' ELSE ? END,
+ CASE WHEN n=1 THEN '2025-11-16T16:01:00.000Z' WHEN n=2 THEN '2025-11-16T15:59:00.000Z' ELSE ? END FROM seq`).bind(tid,recent,recent).run();
+ const snapshot:any=await(await request('/data')).json();expect(snapshot.notifications).toHaveLength(500);expect(snapshot.notifications.some((n:any)=>n.id==='archive-1')).toBe(false);
+ const query=async(filters:any={},c=cookie,token=csrf)=>request('/notifications/query',filters,c,token);
+ const first:any=await(await query({},staffCookie,staffCsrf)).json();expect(first.total).toBe(530);expect(first.notices).toHaveLength(10);expect(first.pages).toBe(53);
+ const old:any=await(await query({query:'100%_',teacher:tid,from:'2025-11-17',to:'2025-11-17'})).json();expect(old.total).toBe(1);expect(old.notices[0].id).toBe('archive-1');
+ expect(JSON.stringify(old)).not.toContain(t.line_user_id);expect(old.notices[0].retry_key).toBeUndefined();expect(old.notices[0].operation_token).toBeUndefined();
+ const last:any=await(await query({page:'999'})).json();expect(last.page).toBe(53);expect(last.notices).toHaveLength(10);
+ const empty:any=await(await query({send:'failed'})).json();expect(empty.total).toBe(0);expect(empty.notices).toHaveLength(0);
+});
+it('通知查詢驗證登入、CSRF、來源及查詢格式，錯誤條件不能當 SQL 執行',async()=>{
+ expect((await request('/notifications/query',{},'','')).status).toBe(401);expect((await request('/notifications/query',{},cookie,'wrong')).status).toBe(403);
+ expect((await request('/notifications/query',{},cookie,csrf,{Origin:'https://untrusted.example'})).status).toBe(403);
+ for(const body of [{page:'0'},{page:'1 OR 1=1'},{status:'不支援'},{send:'不支援'},{from:'2026-02-30'},{from:'2026-11-18',to:'2026-11-17'},{query:'a'.repeat(201)},{query:123}])expect((await request('/notifications/query',body)).status).toBe(400);
+ const literal:any=await(await request('/notifications/query',{query:"' OR 1=1 --"})).json();expect(literal.total).toBe(0);
+});
 it('未查看依登入人員分開計算，僅更新實際查看的訊息，不倒退或清掉後續訊息',async()=>{
  const tid=await teacher(true),other=await teacher(true),t=await get('SELECT * FROM teachers WHERE id=?',tid);
  await hook([ev('第一則',t.line_user_id)]);const first=await get("SELECT id FROM messages WHERE teacher_id=?",tid);

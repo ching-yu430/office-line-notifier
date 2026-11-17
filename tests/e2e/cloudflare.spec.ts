@@ -41,3 +41,23 @@ test('Cloudflare 模式：實際 Cookie 登入、綁定、推播 Mock、簽章 W
  await page.reload();await expect(page.getByRole('heading',{name:'值班工作台'})).toBeVisible();await page.getByRole('button',{name:'系統管理',exact:true}).click();await page.getByRole('button',{name:'新增行政帳號'}).click();await page.getByLabel('登入帳號',{exact:true}).fill('staff-'+randomUUID());await page.getByLabel('初始密碼',{exact:true}).fill(randomBytes(20).toString('hex'));await page.getByLabel('顯示名稱',{exact:true}).fill('虛構新行政人員');await page.getByRole('button',{name:'儲存權限'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.locator('.settings-grid')).toContainText('虛構新行政人員');
  await page.getByRole('button',{name:'登出',exact:true}).click();await expect(page.getByRole('button',{name:'登入辦公室'})).toBeVisible();expect(errors).toEqual([]);
 });
+
+test('預覽網址提供正式入口並停用登入，不送出帳密',async({page},info)=>{
+ let attempts=0;
+ await page.route(origin+'/api/**',async route=>{const req=route.request();if(new URL(req.url()).pathname==='/api/login')attempts++;const response=await mf.dispatchFetch('http://localhost'+new URL(req.url()).pathname,{method:req.method(),headers:await req.allHeaders(),...(req.method()==='POST'?{body:req.postData()!}:{})});await route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()});});
+ await page.route(origin+'/api/public-info',route=>route.fulfill({json:{name:'辦公室小幫手',origin:'https://office-line-notifier.pages.dev',version:'2026.11.17.2'}}));
+ await page.goto(origin);await expect(page.getByRole('alert')).toContainText('請從正式網站登入');await expect(page.getByRole('link',{name:'前往正式網站'})).toHaveAttribute('href','https://office-line-notifier.pages.dev/');await expect(page.getByRole('button',{name:'登入辦公室'})).toBeDisabled();await expect(page.getByLabel('登入帳號',{exact:true})).toBeDisabled();expect(attempts).toBe(0);await page.screenshot({path:info.outputPath('preview-login.png'),fullPage:true,animations:'disabled'});
+});
+
+test('正式模式查詢超過 500 筆的舊通知，更新與復原後畫面同步',async({page})=>{
+ const db=await mf.getD1Database('DB'),tid=randomUUID(),prefix=randomUUID(),now=new Date().toISOString(),callsBefore=lineCalls.length;
+ await db.prepare("INSERT INTO teachers(id,name,line_user_id,bound_at,binding_version,created_at,updated_at) VALUES(?,?,?, ?,1,?,?)").bind(tid,'虛構歷史查詢教師','U'+randomUUID(),now,now,now).run();
+ await db.prepare(`WITH RECURSIVE seq(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<520)
+ INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,send_status,status,created_at,sent_at)
+ SELECT ?||n,?||n,?,'mail',CASE WHEN n=1 THEN '資料庫舊紀錄100%完整文字' ELSE '其他歷史通知'||n END,'browser-admin',1,?||n,'accepted','待領取',
+ CASE WHEN n=1 THEN '2025-01-01T00:00:00.000Z' ELSE ? END,CASE WHEN n=1 THEN '2025-01-01T00:00:00.000Z' ELSE ? END FROM seq`).bind('n-'+prefix,'r-'+prefix,tid,'retry-'+prefix,now,now).run();
+ await page.route(origin+'/api/**',async route=>{const req=route.request();const response=await mf.dispatchFetch('http://localhost'+new URL(req.url()).pathname+new URL(req.url()).search,{method:req.method(),headers:await req.allHeaders(),...(req.method()==='POST'?{body:req.postData()!}:{})});await route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()});});
+ await page.goto(origin);await page.getByLabel('登入帳號',{exact:true}).fill(username);await page.getByLabel('密碼',{exact:true}).fill(password);await page.getByRole('button',{name:'登入辦公室'}).click();await expect(page.getByRole('heading',{name:'值班工作台'})).toBeVisible();
+ await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await page.getByLabel('搜尋通知').fill('資料庫舊紀錄100%');await expect(page.locator('tbody tr')).toHaveCount(1);await expect(page.locator('tbody')).toContainText('資料庫舊紀錄100%完整文字');
+ const status=page.getByLabel('更新虛構歷史查詢教師處理狀態');await status.selectOption('已完成');await expect(status).toHaveValue('已完成');await page.locator('.toast').getByRole('button',{name:'復原',exact:true}).click();await expect(status).toHaveValue('待領取');expect(lineCalls.length).toBe(callsBefore);
+});

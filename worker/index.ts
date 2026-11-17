@@ -5,6 +5,8 @@ import{command}from'./commands';
 import{webhook}from'./webhook';
 import{recover}from'./line';
 import{operationalFailure}from'./errors';
+import{APP_VERSION}from'../src/version';
+import{notificationHistory}from'./notification-history';
 const securityHeaders={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 export default {
  async fetch(req:Request,env:Env):Promise<Response>{
@@ -25,7 +27,13 @@ export default {
    if(path==='/api/line/webhook'){
     try{return await webhook(req,env);}catch(e){if(e instanceof HttpError)return json({error:e.message,...(e.code?{code:e.code}:{})},e.status);return json({error:'暫時無法處理，請 LINE 重送'},500);}
    }
-   if(origin&&origin!==allowed)throw new HttpError(403,'來源不允許');
+   // 公開資訊不包含帳號、憑證或資料庫內容；用於預覽網址導回正式登入。
+   if(path==='/api/public-info'&&req.method==='GET'){
+    let publicOrigin:string|null=null;
+    try{const target=new URL(allowed);if(target.origin===allowed&&(target.protocol==='https:'||(['localhost','127.0.0.1'].includes(target.hostname)&&target.protocol==='http:')))publicOrigin=target.origin;}catch{}
+    return json({name:'辦公室小幫手',origin:publicOrigin,version:APP_VERSION});
+   }
+   if(origin&&origin!==allowed)throw new HttpError(403,'目前網址無法登入，請從正式網站開啟','ORIGIN_NOT_ALLOWED');
    if(req.method==='OPTIONS')return new Response(null,{status:204,headers});
    if(!['GET','POST'].includes(req.method))throw new HttpError(405,'不支援的請求方法');
    if(req.method==='POST'&&(!origin||origin!==allowed))throw new HttpError(403,'缺少正確的網頁來源');
@@ -39,6 +47,10 @@ export default {
    const s=await session(req,env);if(req.method==='POST')await csrf(req,s);
    if(path==='/api/session'&&req.method==='GET')return json({actor:{id:s.id,username:s.username,display_name:s.display_name,role:s.role},csrf:s.csrf_token});
    if(path==='/api/logout'&&req.method==='POST'){await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE token_hash=?').bind(s.token_hash),audit(env.DB,s.id,'logout')]);headers.set('Set-Cookie',cookie('',env,0));return json({ok:true});}
+   if(path==='/api/notifications/query'&&req.method==='POST'){
+    const filters=new URLSearchParams();for(const key of ['page','teacher','status','send','query','from','to']){if(body[key]!=null){if(typeof body[key]!=='string')throw new HttpError(400,'查詢欄位格式錯誤');filters.set(key,body[key]);}}
+    return json(await notificationHistory(env,s,filters));
+   }
    if(path==='/api/conversation'&&req.method==='GET'){
     const tid=url.searchParams.get('teacher_id');if(!tid||!/^[a-zA-Z0-9_-]{1,80}$/.test(tid))throw new HttpError(400,'教師識別碼格式錯誤');
     if(!await env.DB.prepare('SELECT id FROM teachers WHERE id=?').bind(tid).first())throw new HttpError(404,'找不到教師');

@@ -3,11 +3,12 @@ import{generateCode,hashCode,sha256,passwordHash}from'./security';
 import{limit}from'./auth';
 import{dispatch,type ReplyCompletion}from'./line';
 import{workflowCommand,saveUndo,undoInfo}from'./workflow';
+import{APP_VERSION}from'../src/version';
 export async function command(env:Env,actor:Actor,action:string,p:any){
  const db=env.DB,now=iso();
  const result=await workflowCommand(env,actor,action,p);if(result!==undefined)return result;
  if(['teacher_save','issue_code','unbind','staff_save','template_save','system_status'].includes(action))admin(actor);
- if(action==='system_status')return {send_enabled:env.LINE_SEND_ENABLED==='true',line_configured:!!env.LINE_CHANNEL_ACCESS_TOKEN&&!!env.LINE_CHANNEL_SECRET,binding_configured:env.BINDING_PEPPER?.length>=32};
+ if(action==='system_status')return {version:APP_VERSION,public_origin:env.ALLOWED_ORIGIN,send_enabled:env.LINE_SEND_ENABLED==='true',line_configured:!!env.LINE_CHANNEL_ACCESS_TOKEN&&!!env.LINE_CHANNEL_SECRET,binding_configured:env.BINDING_PEPPER?.length>=32};
  if(action==='teacher_save'){
   const tid=p.teacher_id?id(p.teacher_id):crypto.randomUUID();const name=text(p.name,'教師姓名',80),dept=text(p.department??'','單位',500,0),notes=text(p.notes??'','備註',500,0);
   const statements=[db.prepare(`INSERT INTO teachers(id,name,department,notes,active,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,department=excluded.department,notes=excluded.notes,active=excluded.active,updated_at=excluded.updated_at`).bind(tid,name,dept,notes,p.active===false?0:1,now,now),audit(db,actor.id,action,tid)];

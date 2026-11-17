@@ -101,3 +101,10 @@ npx wrangler d1 time-travel restore office-line-notifier --bookmark 實際BOOKMA
 GitHub CI 執行測試、Workers 型別檢查及 Pages 編譯，不會部署 Cloudflare。舊 GitHub Pages 手動工作流程只發布展示版。若既有儲存庫啟用了「main 根目錄」Pages，推送 main 的靜態成品仍會觸發舊展示頁更新；正式 Cloudflare 分支應經確認後再推送／綁定。
 
 部署前執行全部測試、備份 D1、檢查 Secrets 不在 `VITE_`／Git／編譯產物。先在隔離測試環境驗證，再由專案擁有者核准正式部署。程式回版不會自動還原 schema；Migration 依前後相容策略前進，重大變更另備回復計畫。
+
+
+## 2026.11.17.2 操作修整
+
+新版以 [介面與操作修整](REFINEMENT-UPDATE.md) 為準，已套用 0002 的系統不再執行遷移。通知紀錄每頁 10 筆，今日、近一週、指定日期可與教師及發送結果一起篩選；點通知內容可看全文。批次全選僅針對搜尋結果，發送前核對已選標籤。多行聊天 Enter 換行、Ctrl＋Enter 或按送出；閱讀舊訊息時新訊息不會拉動捲軸。手機用對話左上返回鍵回名單。
+
+從預覽網址開啟時請依畫面指引前往正式網站。若版本不同，先確認最新正式部署成功，再強制重新整理；不用因此重設帳密或綁定。

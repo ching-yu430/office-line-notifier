@@ -2,20 +2,30 @@
 export const mock=(import.meta.env.VITE_APP_MODE||'mock')==='mock';
 const base=(import.meta.env.VITE_API_BASE||'/api').replace(/\/$/,'');
 let csrfToken='',etag='',cached:Data|null=null;
-export class ApiError extends Error{constructor(public status:number,message:string){super(message);}}
+export class ApiError extends Error{constructor(public status:number,message:string,public code?:string){super(message);}}
 async function request(path:string,body?:unknown,extra:Record<string,string>={}){
  let response:Response;
  try{response=await fetch(base+path,{method:body===undefined?'GET':'POST',credentials:'include',headers:{...(body===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':csrfToken}),...extra},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(path==='/command'?65000:20000)});}catch{throw new ApiError(0,path==='/command'?'連線中斷，操作可能已完成；請先查詢紀錄，避免重複操作':'無法連線至後端，請確認網路與服務狀態');}
  if(response.status===304)return response;
- if(!response.ok){let message='操作失敗，請稍後重試';try{message=(await response.json() as any).error||message;}catch{}if(response.status===401){csrfToken='';etag='';cached=null;window.dispatchEvent(new Event('office-session-expired'));}throw new ApiError(response.status,message);}
+ if(!response.ok){let message='操作失敗，請稍後重試',code:string|undefined;try{const body=await response.json() as any;message=body.error||message;code=body.code;}catch{}if(response.status===401){csrfToken='';etag='';cached=null;window.dispatchEvent(new Event('office-session-expired'));}throw new ApiError(response.status,message,code);}
  return response;
 }
 export async function getSession(){try{const r=await request('/session');const result:any=await r.json();csrfToken=result.csrf;return result.actor;}catch(e){if(e instanceof ApiError&&e.status===401)return null;throw e;}}
 export async function signIn(username:string,password:string){const result:any=await(await request('/login',{username,password})).json();csrfToken=result.csrf;etag='';cached=null;return result.actor;}
 export async function signOut(){await request('/logout',{});csrfToken='';etag='';cached=null;}
+export type PublicInfo={name:string;origin:string|null;version:string};
+export async function getPublicInfo():Promise<PublicInfo|null>{
+ if(mock)return null;
+ try{const response=await fetch(base+'/public-info',{credentials:'omit',signal:AbortSignal.timeout(10000)});if(!response.ok)return null;const info=await response.json() as PublicInfo;
+  if(info.origin){const target=new URL(info.origin);if(target.origin!==info.origin||!(target.protocol==='https:'||(target.protocol==='http:'&&['localhost','127.0.0.1'].includes(target.hostname))))return null;}
+  return typeof info.version==='string'?info:null;
+ }catch{return null;}
+}
 
 export type Teacher={id:string;name:string;department:string;notes:string;active:boolean;bound_at:string|null;last_notified_at:string|null};
-export type Notice={id:string;teacher_id:string;kind:string;content:string;important:boolean;send_status:string;status:string;created_at:string;sender_id:string;completed_at?:string;completed_by?:string;error_code?:string;version?:number};
+export type Notice={id:string;teacher_id:string;kind:string;content:string;important:boolean;send_status:string;status:string;created_at:string;sent_at?:string|null;sender_id:string;completed_at?:string;completed_by?:string;error_code?:string;version?:number;latest_reply?:string|null;latest_reply_at?:string|null};
+export type NoticePage={notices:Notice[];total:number;page:number;pages:number;page_size:number};
+export async function loadNoticePage(params:URLSearchParams):Promise<NoticePage>{return (await request('/notifications/query',Object.fromEntries(params))).json();}
 export type Message={id:string;teacher_id:string;direction:string;content:string;created_at:string;notification_id?:string;withdrawn?:boolean;sender_name?:string};
 export type Handover={id:string;content:string;created_by:string;creator_name:string;handover_name:string;created_at:string;completed_at:string|null;completed_by:string|null;completed_name:string|null;finisher_name:string|null;version:number};
 export type InternalNote={id:string;teacher_id:string;content:string;author_id:string;author_name:string;created_at:string};
@@ -85,7 +95,7 @@ export async function command(action:string,payload:any={}):Promise<any>{
  for(const id of payload.teacher_ids){
   if(demo.notifications.some((n:any)=>n.request_id===payload.request_id&&n.teacher_id===id))continue;
   const notificationId=crypto.randomUUID(),isReply=payload.kind==='reply',sentAt=now();
-  demo.notifications.unshift({id:notificationId,...payload,teacher_id:id,send_status:'accepted',status:isReply?'已完成':['mail','parcel'].includes(payload.kind)?'待領取':'待回覆',sender_id:actor,created_at:sentAt,...(isReply?{completed_at:sentAt,completed_by:actor}:{})});
+  demo.notifications.unshift({id:notificationId,...payload,teacher_id:id,send_status:'accepted',status:isReply?'已完成':['mail','parcel'].includes(payload.kind)?'待領取':'待回覆',sender_id:actor,created_at:sentAt,sent_at:sentAt,...(isReply?{completed_at:sentAt,completed_by:actor}:{})});
   demo.messages.push({id:crypto.randomUUID(),teacher_id:id,notification_id:notificationId,direction:'out',content:payload.content,created_at:sentAt});demo.teachers.find(t=>t.id===id)!.last_notified_at=sentAt;
   if(isReply&&Object.hasOwn(payload,'last_inbound_id')){
    const latest=[...demo.messages].reverse().find(m=>m.teacher_id===id&&m.direction==='in')?.id??null;

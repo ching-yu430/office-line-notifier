@@ -1,4 +1,5 @@
 import {type Env,type Actor,HttpError,id,iso,unix,audit} from './types';
+import {isPickup} from '../src/notice';
 import {limit} from './auth';
 
 export function saveUndo(env:Env,actor:Actor,type:'notification'|'handover',before:any,operation:string){
@@ -32,7 +33,7 @@ export async function workflowCommand(env:Env,actor:Actor,action:string,p:any){
   if(!before)throw new HttpError(404,'找不到通知紀錄');
   if(p.expected_version!=null&&p.expected_version!==before.version)throw new HttpError(409,'這筆紀錄已由其他人更新，請重新載入');
   if(before.status===p.status)return {};
-  const operation=crypto.randomUUID(),canUndo=p.status==='已完成'&&['mail','parcel'].includes(before.kind);
+  const operation=crypto.randomUUID(),canUndo=p.status==='已完成'&&isPickup(before);
   const statements=[db.prepare(`UPDATE notifications SET status=?,completed_at=?,completed_by=?,version=version+1,operation_token=? WHERE id=? AND version=?`).bind(p.status,p.status==='已完成'?now:null,p.status==='已完成'?actor.id:null,operation,before.id,before.version)];
   if(canUndo)statements.push(saveUndo(env,actor,'notification',before,operation));
   statements.push(db.prepare(`INSERT INTO audit_logs(id,actor_id,action,teacher_id,created_at) SELECT ?,?,'complete',teacher_id,? FROM notifications WHERE id=? AND operation_token=?`).bind(crypto.randomUUID(),actor.id,now,before.id,operation));

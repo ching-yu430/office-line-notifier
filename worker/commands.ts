@@ -3,6 +3,7 @@ import{generateCode,hashCode,sha256,passwordHash}from'./security';
 import{limit}from'./auth';
 import{dispatch,type ReplyCompletion}from'./line';
 import{workflowCommand,saveUndo,undoInfo}from'./workflow';
+import {isPickup} from '../src/notice';
 import {resolveBindingLink} from './binding-link';
 import {pickupCommand} from './pickups';
 import{APP_VERSION}from'../src/version';
@@ -55,7 +56,10 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
  }
  if(action==='send'){
   if(env.LINE_SEND_ENABLED!=='true'||!env.LINE_CHANNEL_ACCESS_TOKEN)throw new HttpError(409,'真實發送尚未啟用，請先完成測試與核准');
-  const content=text(p.content,'訊息'),kind=p.kind,request=id(p.request_id);
+  const content=text(p.content,'訊息'),requestedKind=p.kind,kind=requestedKind==='pickup'?'custom':requestedKind,request=id(p.request_id);
+  const pickupName=requestedKind==='pickup'?text(p.pickup_name,'物品名稱',80):null;
+  if(requestedKind!=='pickup'&&p.pickup_name!=null)throw new HttpError(400,'請使用其他待領物品類型');
+  const pickup=isPickup({kind,pickup_name:pickupName});
   if(!['mail','parcel','contact','custom','reply'].includes(kind)||!Array.isArray(p.teacher_ids)||p.teacher_ids.length<1||p.teacher_ids.length>100)throw new HttpError(400,'通知類型或對象錯誤，每批 1 至 100 位');
   const ids=[...new Set<string>(p.teacher_ids.map(id))].sort();
   let reply:ReplyCompletion|undefined;
@@ -68,18 +72,18 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
    }
   }
   if(p.duplicate_confirmed!=null&&typeof p.duplicate_confirmed!=='boolean')throw new HttpError(400,'重複通知確認格式錯誤');
-  const fingerprint=await sha256(JSON.stringify({ids,content,kind,...(reply?{reply}:{}),...(p.duplicate_confirmed?{duplicate_confirmed:true}:{})}));
+  const fingerprint=await sha256(JSON.stringify({ids,content,kind,...(pickupName?{pickup_name:pickupName}:{}),...(reply?{reply}:{}),...(p.duplicate_confirmed?{duplicate_confirmed:true}:{})}));
   const existing=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();
   if(existing&&(existing.fingerprint!==fingerprint||existing.actor_id!==actor.id))throw new HttpError(409,'重複請求內容不一致');
   await limit(env,'send:'+actor.id,30,60);
   const items=ids.map(tid=>({id:crypto.randomUUID(),teacher_id:tid,retry_key:crypto.randomUUID()}));
   // 單一 JSON 參數批次建立，維持 100 位上限並避免超過免費方案每次 D1 查詢／參數上限。
-  const statements=[db.prepare(`INSERT INTO send_requests(id,actor_id,fingerprint,created_at) SELECT ?,?,?,? WHERE ?=1 OR NOT EXISTS(SELECT 1 FROM notifications WHERE teacher_id IN(SELECT value FROM json_each(?)) AND kind IN ('mail','parcel') AND status='待領取') ON CONFLICT(id) DO NOTHING`).bind(request,actor.id,fingerprint,now,!['mail','parcel'].includes(kind)||p.duplicate_confirmed===true?1:0,JSON.stringify(ids)),
-   db.prepare(`INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,status,created_at)
-   SELECT json_extract(j.value,'$.id'),?,json_extract(j.value,'$.teacher_id'),?,?,?,coalesce(t.binding_version,-1),json_extract(j.value,'$.retry_key'),?,?
+  const statements=[db.prepare(`INSERT INTO send_requests(id,actor_id,fingerprint,created_at) SELECT ?,?,?,? WHERE ?=1 OR NOT EXISTS(SELECT 1 FROM notifications WHERE teacher_id IN(SELECT value FROM json_each(?)) AND (kind IN ('mail','parcel') OR pickup_name IS NOT NULL) AND status='待領取') ON CONFLICT(id) DO NOTHING`).bind(request,actor.id,fingerprint,now,!pickup||p.duplicate_confirmed===true?1:0,JSON.stringify(ids)),
+   db.prepare(`INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,status,created_at,pickup_name)
+   SELECT json_extract(j.value,'$.id'),?,json_extract(j.value,'$.teacher_id'),?,?,?,coalesce(t.binding_version,-1),json_extract(j.value,'$.retry_key'),?,?,?
    FROM json_each(?) j LEFT JOIN teachers t ON t.id=json_extract(j.value,'$.teacher_id')
    WHERE NOT EXISTS(SELECT 1 FROM notifications WHERE request_id=? AND teacher_id=json_extract(j.value,'$.teacher_id'))
-   AND EXISTS(SELECT 1 FROM send_requests WHERE id=? AND actor_id=? AND fingerprint=?)`).bind(request,kind,content,actor.id,['mail','parcel'].includes(kind)?'待領取':'待回覆',now,JSON.stringify(items),request,request,actor.id,fingerprint)];
+   AND EXISTS(SELECT 1 FROM send_requests WHERE id=? AND actor_id=? AND fingerprint=?)`).bind(request,kind,content,actor.id,pickup?'待領取':'待回覆',now,pickupName,JSON.stringify(items),request,request,actor.id,fingerprint)];
   await db.batch(statements);
   const req=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();if(!req)throw new HttpError(409,'教師已有待領取紀錄，請確認是否為新件或仍需再次通知','DUPLICATE_NOTICE');if(req.fingerprint!==fingerprint||req.actor_id!==actor.id)throw new HttpError(409,'重複請求內容不一致');
   const notices=await rows<{id:string}>(db.prepare('SELECT id FROM notifications WHERE request_id=? ORDER BY teacher_id').bind(request));

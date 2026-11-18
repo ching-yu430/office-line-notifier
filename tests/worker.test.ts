@@ -385,3 +385,28 @@ it('一百筆領件與復原使用固定數量查詢，不超過 D1 批次參數
  const r=await cmd('pickup_many',{request_id:randomUUID(),teacher_id:tid,items});expect(r.status).toBe(200);const body:any=await r.json();expect(body.undo.ids).toHaveLength(100);expect((await get("SELECT count(*) AS n FROM notifications WHERE status='已完成'")).n).toBe(100);
  const undo=await cmd('undo_many',{request_id:randomUUID(),ids:body.undo.ids});expect(undo.status).toBe(200);expect((await get("SELECT count(*) AS n FROM notifications WHERE status='待領取'")).n).toBe(100);expect(calls).toHaveLength(0);
 });
+it('自填待領物品正確儲存、聊天與歷史顯示，單筆及多筆領取可復原',async()=>{
+ const tid=await teacher(true),payload={request_id:randomUUID(),teacher_ids:[tid],kind:'pickup',pickup_name:'借用器材',content:'請來辦公室領取',duplicate_confirmed:true};
+ const r=await cmd('send',payload,staffCookie,staffCsrf);expect(r.status).toBe(200);const n=await get('SELECT * FROM notifications WHERE request_id=?',payload.request_id);expect(n.kind).toBe('custom');expect(n.pickup_name).toBe('借用器材');expect(n.status).toBe('待領取');
+ expect(calls.at(-1)!.body.messages[0].text).toBe('請來辦公室領取');const c:any=await(await request('/conversation?teacher_id='+tid)).json();expect(c.pickups[0].pickup_name).toBe('借用器材');
+ const history:any=await(await request('/notifications/query',{query:'借用器材'})).json();expect(history.total).toBe(1);expect(history.notices[0].pickup_name).toBe('借用器材');
+ const done:any=await(await cmd('complete',{id:n.id,status:'已完成',expected_version:1})).json();expect(done.undo.id).toBeTruthy();await cmd('undo',{id:done.undo.id});
+ const current=await get('SELECT * FROM notifications WHERE id=?',n.id),batch:any=await(await cmd('pickup_many',{request_id:randomUUID(),teacher_id:tid,items:[{id:n.id,expected_version:current.version}]})).json();expect(batch.undo.ids).toHaveLength(1);expect((await cmd('undo_many',{request_id:randomUUID(),ids:batch.undo.ids})).status).toBe(200);
+});
+it('自填物品名稱必填、限八十字、不能混入一般訊息；也要通過綁定與重複通知檢查',async()=>{
+ const tid=await teacher(true),base={request_id:randomUUID(),teacher_ids:[tid],kind:'pickup',content:'測試文字'};
+ for(const pickup_name of [undefined,'','   ','物'.repeat(81),123])expect((await cmd('send',{...base,pickup_name})).status).toBe(400);
+ expect((await cmd('send',{...base,kind:'custom',pickup_name:'不可混用'})).status).toBe(400);
+ expect((await cmd('send',{...base,pickup_name:'教材'})).status).toBe(200);
+ const duplicate=await cmd('send',{...base,request_id:randomUUID(),pickup_name:'另一件'});expect(duplicate.status).toBe(409);expect((await duplicate.json() as any).code).toBe('DUPLICATE_NOTICE');
+ const pending:any=await(await cmd('notification_preflight',{teacher_ids:[tid]})).json();expect(pending.pending[0].count).toBe(1);
+ const unbound=await teacher();expect((await cmd('send',{...base,request_id:randomUUID(),teacher_ids:[unbound],pickup_name:'教材'})).status).toBe(409);
+ expect((await cmd('send',{...base,pickup_name:'更改名稱',duplicate_confirmed:true})).status).toBe(409);
+});
+it('輕量版本檢查有 Session 與來源保護，無變更回 304 且不產生操作或限流寫入',async()=>{
+ const data=await request('/data'),tag=data.headers.get('etag')!,before=await get('SELECT version FROM system_meta WHERE id=1'),audits=await get('SELECT count(*) AS n FROM audit_logs'),rates=await get('SELECT count(*) AS n FROM rate_limits');
+ const r=await request('/changes',undefined,cookie,csrf,{'If-None-Match':tag});expect(r.status).toBe(304);expect(await r.text()).toBe('');expect((await get('SELECT version FROM system_meta WHERE id=1')).version).toBe(before.version);expect((await get('SELECT count(*) AS n FROM audit_logs')).n).toBe(audits.n);expect((await get('SELECT count(*) AS n FROM rate_limits')).n).toBe(rates.n);
+ const tid=await teacher(true),changed=await request('/changes',undefined,cookie,csrf,{'If-None-Match':tag});expect(changed.status).toBe(200);expect(await changed.json()).toEqual({changed:true});
+ expect((await request('/changes',undefined,'','')).status).toBe(401);expect((await request('/changes',undefined,cookie,csrf,{Origin:'https://other.example'})).status).toBe(403);
+ const t=await get('SELECT * FROM teachers WHERE id=?',tid),v=t.conversation_version;await hook([ev('新文字',t.line_user_id)]);expect((await get('SELECT conversation_version FROM teachers WHERE id=?',tid)).conversation_version).toBeGreaterThan(v);
+});

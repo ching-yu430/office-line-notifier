@@ -1,18 +1,20 @@
+import {isPickup} from './notice';
 
 export const mock=(import.meta.env.VITE_APP_MODE||'mock')==='mock';
 const base=(import.meta.env.VITE_API_BASE||'/api').replace(/\/$/,'');
-let csrfToken='',etag='',cached:Data|null=null;
+let csrfToken='',etag='',cached:Data|null=null,cacheGeneration=0;
+function clearCache(){cacheGeneration++;etag='';cached=null;loadingData=null;}
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string){super(message);}}
 async function request(path:string,body?:unknown,extra:Record<string,string>={}){
  let response:Response;
  try{response=await fetch(base+path,{method:body===undefined?'GET':'POST',credentials:'include',headers:{...(body===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':csrfToken}),...extra},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(path==='/command'?65000:20000)});}catch{throw new ApiError(0,path==='/command'?'連線中斷，操作可能已完成；請先查詢紀錄，避免重複操作':'無法連線至後端，請確認網路與服務狀態');}
  if(response.status===304)return response;
- if(!response.ok){let message='操作失敗，請稍後重試',code:string|undefined;try{const body=await response.json() as any;message=body.error||message;code=body.code;}catch{}if(response.status===401){csrfToken='';etag='';cached=null;window.dispatchEvent(new Event('office-session-expired'));}throw new ApiError(response.status,message,code);}
+ if(!response.ok){let message='操作失敗，請稍後重試',code:string|undefined;try{const body=await response.json() as any;message=body.error||message;code=body.code;}catch{}if(response.status===401){csrfToken='';clearCache();window.dispatchEvent(new Event('office-session-expired'));}throw new ApiError(response.status,message,code);}
  return response;
 }
 export async function getSession(){try{const r=await request('/session');const result:any=await r.json();csrfToken=result.csrf;return result.actor;}catch(e){if(e instanceof ApiError&&e.status===401)return null;throw e;}}
-export async function signIn(username:string,password:string){const result:any=await(await request('/login',{username,password})).json();csrfToken=result.csrf;etag='';cached=null;return result.actor;}
-export async function signOut(){await request('/logout',{});csrfToken='';etag='';cached=null;}
+export async function signIn(username:string,password:string){const result:any=await(await request('/login',{username,password})).json();csrfToken=result.csrf;clearCache();return result.actor;}
+export async function signOut(){await request('/logout',{});csrfToken='';clearCache();}
 export type PublicInfo={name:string;origin:string|null;version:string};
 export async function getPublicInfo():Promise<PublicInfo|null>{
  if(mock)return null;
@@ -22,8 +24,8 @@ export async function getPublicInfo():Promise<PublicInfo|null>{
  }catch{return null;}
 }
 
-export type Teacher={id:string;name:string;department:string;notes:string;active:boolean;bound_at:string|null;last_notified_at:string|null};
-export type Notice={id:string;teacher_id:string;kind:string;content:string;important:boolean;send_status:string;status:string;created_at:string;sent_at?:string|null;sender_id:string;completed_at?:string;completed_by?:string;error_code?:string;version?:number;latest_reply?:string|null;latest_reply_at?:string|null};
+export type Teacher={conversation_version?:number;id:string;name:string;department:string;notes:string;active:boolean;bound_at:string|null;last_notified_at:string|null};
+export type Notice={pickup_name?:string|null;id:string;teacher_id:string;kind:string;content:string;important:boolean;send_status:string;status:string;created_at:string;sent_at?:string|null;sender_id:string;completed_at?:string;completed_by?:string;error_code?:string;version?:number;latest_reply?:string|null;latest_reply_at?:string|null};
 export type NoticePage={notices:Notice[];total:number;page:number;pages:number;page_size:number};
 export async function loadNoticePage(params:URLSearchParams):Promise<NoticePage>{return (await request('/notifications/query',Object.fromEntries(params))).json();}
 export type Message={id:string;teacher_id:string;direction:string;content:string;created_at:string;notification_id?:string;withdrawn?:boolean;sender_name?:string};
@@ -43,13 +45,28 @@ type DemoData=Data&{operation_requests?:Record<string,{fingerprint:string;actor:
 let demo:DemoData=initialDemo();
 function normalize(){demo.operation_requests ||= {};demo.views ||= [];demo.undo_actions ||= [];demo.presence ||= [];for(const n of demo.notifications)n.version ??=1;demo.conversations ||= [];demo.handovers ||= [];demo.internal_notes ||= [];demo.handover_revisions ||= [];for(const h of demo.handovers){h.handover_name ??=h.creator_name;h.finisher_name ??=h.completed_name;h.version ??=1;}}
 normalize();
-function readLatestDemo(){const saved=localStorage.getItem(storageKey);if(saved)demo=JSON.parse(saved);normalize();}
+function readLatestDemo(){try{const saved=localStorage.getItem(storageKey);if(saved)demo=JSON.parse(saved);}catch{}normalize();}
 let demoRole='admin';
 // Volatile only: do not persist plaintext demo codes.
 const codes=new Map<string,{teacher_id:string;expires:number}>();
-function persist(){localStorage.setItem(storageKey,JSON.stringify(demo));window.dispatchEvent(new Event('office-refresh'));}
+function persist(){try{localStorage.setItem(storageKey,JSON.stringify(demo));}catch{}window.dispatchEvent(new Event('office-refresh'));}
 export function changeDemoRole(role:string){demoRole=role;}
-export async function load():Promise<Data>{
+let loadingData:Promise<Data>|null=null;
+export async function load(fresh=false):Promise<Data>{
+ const generation=cacheGeneration;
+ // 寫入完成後不能沿用寫入前的快照；一般輪詢仍合併同時載入。
+ if(fresh&&loadingData)await loadingData.catch(()=>{});
+ if(generation!==cacheGeneration)throw new ApiError(409,'登入狀態已變更','SESSION_CHANGED');
+ if(loadingData)return loadingData;
+ const task=loadSnapshot(generation);loadingData=task;
+ try{return await task;}finally{if(loadingData===task)loadingData=null;}
+}
+export async function pollData(force=false):Promise<Data|null>{
+ if(mock)return load();
+ if(!force&&cached){const r=await request('/changes',undefined,etag?{'If-None-Match':etag}:{});if(r.status===304)return null;}
+ return load();
+}
+async function loadSnapshot(generation:number):Promise<Data>{
  if(mock){
   readLatestDemo();const actor=demoRole==='admin'?'demo-admin':'demo-staff';
   const result=structuredClone(demo);
@@ -58,11 +75,14 @@ export async function load():Promise<Data>{
   return result;
  }
  const response=await request('/data',undefined,etag?{'If-None-Match':etag}:{});
+ if(generation!==cacheGeneration)throw new ApiError(409,'登入狀態已變更','SESSION_CHANGED');
  if(response.status===304&&cached)return structuredClone(cached);
- cached=await response.json();etag=response.headers.get('etag')||'';return structuredClone(cached!);
+ const next=await response.json();
+ if(generation!==cacheGeneration)throw new ApiError(409,'登入狀態已變更','SESSION_CHANGED');
+ cached=next;etag=response.headers.get('etag')||'';return structuredClone(cached!);
 }
 export async function loadConversation(teacherId:string):Promise<{messages:Message[];pickups:Notice[]}>{
- if(mock){const d=await load();return {messages:d.messages.filter(m=>m.teacher_id===teacherId),pickups:d.notifications.filter(n=>n.teacher_id===teacherId&&['mail','parcel'].includes(n.kind)&&n.status==='待領取')};}
+ if(mock){const d=await load();return {messages:d.messages.filter(m=>m.teacher_id===teacherId),pickups:d.notifications.filter(n=>n.teacher_id===teacherId&&isPickup(n)&&n.status==='待領取')};}
  return (await request('/conversation?teacher_id='+encodeURIComponent(teacherId))).json();
 }
 export async function command(action:string,payload:any={}):Promise<any>{
@@ -72,13 +92,13 @@ export async function command(action:string,payload:any={}):Promise<any>{
  const t=demo.teachers.find(t=>t.id===payload.teacher_id);
  let result:any={};
  const actor=demoRole==='admin'?'demo-admin':'demo-staff',actorName=demo.staff.find(s=>s.id===actor)?.display_name||'行政人員';
- if(action==='notification_preflight')return {pending:demo.teachers.filter(t=>payload.teacher_ids.includes(t.id)).map(t=>({teacher_id:t.id,name:t.name,count:demo.notifications.filter(n=>n.teacher_id===t.id&&['mail','parcel'].includes(n.kind)&&n.status==='待領取').length})).filter(t=>t.count)};
+ if(action==='notification_preflight')return {pending:demo.teachers.filter(t=>payload.teacher_ids.includes(t.id)).map(t=>({teacher_id:t.id,name:t.name,count:demo.notifications.filter(n=>n.teacher_id===t.id&&isPickup(n)&&n.status==='待領取').length})).filter(t=>t.count)};
  if(action==='pickup_many'||action==='undo_many'){
   const fingerprint=JSON.stringify({...payload,action}),old=demo.operation_requests![payload.request_id];
   if(old){if(old.fingerprint!==fingerprint||old.actor!==actor)throw Error('重複請求內容不一致');return {already_applied:true};}
   if(action==='pickup_many'){
    if(!Array.isArray(payload.items)||!payload.items.length||payload.items.length>100||new Set(payload.items.map((n:any)=>n.id)).size!==payload.items.length)throw Error('領件資料格式錯誤');
-   const notices=payload.items.map((item:any)=>{const n=demo.notifications.find(n=>n.id===item.id);if(!n||n.teacher_id!==payload.teacher_id||!['mail','parcel'].includes(n.kind)||n.status!=='待領取'||n.version!==item.expected_version)throw Error('領件紀錄已變更，請重新確認');return n;}) as Notice[];
+   const notices=payload.items.map((item:any)=>{const n=demo.notifications.find(n=>n.id===item.id);if(!n||n.teacher_id!==payload.teacher_id||!isPickup(n)||n.status!=='待領取'||n.version!==item.expected_version)throw Error('領件紀錄已變更，請重新確認');return n;}) as Notice[];
    const expires_at=Math.floor(Date.now()/1000)+60,ids=notices.map(n=>{const before=structuredClone(n),id=crypto.randomUUID();Object.assign(n,{status:'已完成',completed_at:now(),completed_by:actor,version:n.version!+1});demo.undo_actions!.push({id,actor_id:actor,type:'notification',before,after_version:n.version!,expires_at});return id;});
    result={undo:{id:payload.request_id,ids,expires_at}};
   }else{
@@ -107,12 +127,14 @@ export async function command(action:string,payload:any={}):Promise<any>{
   if(undo.type==='handover'){revision(current as Handover,before as Handover);demo.handover_revisions[0].action='handover_undo';}
  }
  if(action==='send'){
- if(['mail','parcel'].includes(payload.kind)&&!payload.duplicate_confirmed&&!demo.notifications.some((n:any)=>n.request_id===payload.request_id)&&demo.notifications.some(n=>payload.teacher_ids.includes(n.teacher_id)&&['mail','parcel'].includes(n.kind)&&n.status==='待領取'))throw new ApiError(409,'教師已有待領取紀錄，請確認是否為新件或仍需再次通知','DUPLICATE_NOTICE');
+ if(payload.kind!=='pickup'&&payload.pickup_name!=null)throw Error('請使用其他待領物品類型');
+ if(payload.kind==='pickup'&&(typeof payload.pickup_name!=='string'||!payload.pickup_name.trim()||payload.pickup_name.trim().length>80))throw Error('請填寫 1 至 80 字的物品名稱');
+ if(isPickup({kind:payload.kind})&&!payload.duplicate_confirmed&&!demo.notifications.some((n:any)=>n.request_id===payload.request_id)&&demo.notifications.some(n=>payload.teacher_ids.includes(n.teacher_id)&&isPickup(n)&&n.status==='待領取'))throw new ApiError(409,'教師已有待領取紀錄，請確認是否為新件或仍需再次通知','DUPLICATE_NOTICE');
  for(const id of payload.teacher_ids){const teacher=demo.teachers.find(t=>t.id===id);if(!teacher?.active||!teacher.bound_at)throw Error('教師尚未綁定或已停用');}
  for(const id of payload.teacher_ids){
   if(demo.notifications.some((n:any)=>n.request_id===payload.request_id&&n.teacher_id===id))continue;
   const notificationId=crypto.randomUUID(),isReply=payload.kind==='reply',sentAt=now();
-  demo.notifications.unshift({id:notificationId,...payload,teacher_id:id,send_status:'accepted',status:isReply?'已完成':['mail','parcel'].includes(payload.kind)?'待領取':'待回覆',sender_id:actor,created_at:sentAt,sent_at:sentAt,...(isReply?{completed_at:sentAt,completed_by:actor}:{})});
+  demo.notifications.unshift({id:notificationId,...payload,...(payload.kind==='pickup'?{kind:'custom',pickup_name:payload.pickup_name.trim()}:{}),teacher_id:id,send_status:'accepted',status:isReply?'已完成':isPickup({kind:payload.kind})?'待領取':'待回覆',sender_id:actor,created_at:sentAt,sent_at:sentAt,...(isReply?{completed_at:sentAt,completed_by:actor}:{})});
   demo.messages.push({id:crypto.randomUUID(),teacher_id:id,notification_id:notificationId,direction:'out',content:payload.content,created_at:sentAt});demo.teachers.find(t=>t.id===id)!.last_notified_at=sentAt;
   if(isReply&&Object.hasOwn(payload,'last_inbound_id')){
    const latest=[...demo.messages].reverse().find(m=>m.teacher_id===id&&m.direction==='in')?.id??null;
@@ -132,7 +154,7 @@ export async function command(action:string,payload:any={}):Promise<any>{
   if(payload.expected_version!=null&&payload.expected_version!==n.version)throw Error('這筆紀錄已由其他人更新，請重新載入');
   if(n.status===payload.status)return {};
   const before=structuredClone(n);Object.assign(n,{status:payload.status,completed_at:payload.status==='已完成'?now():null,completed_by:payload.status==='已完成'?actor:null,version:(n.version||1)+1});
-  if(payload.status==='已完成'&&['mail','parcel'].includes(n.kind)){const undo={id:crypto.randomUUID(),actor_id:actor,type:'notification' as const,before,after_version:n.version!,expires_at:Math.floor(Date.now()/1000)+60};demo.undo_actions!.push(undo);result={undo:{id:undo.id,expires_at:undo.expires_at}};}
+  if(payload.status==='已完成'&&isPickup(n)){const undo={id:crypto.randomUUID(),actor_id:actor,type:'notification' as const,before,after_version:n.version!,expires_at:Math.floor(Date.now()/1000)+60};demo.undo_actions!.push(undo);result={undo:{id:undo.id,expires_at:undo.expires_at}};}
  }
  if(action==='handover_create'){
   const content=String(payload.content||'').trim();if(!content||content.length>2000)throw Error('請輸入 1 至 2000 字的交接內容');

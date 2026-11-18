@@ -1,7 +1,8 @@
 import {type Env,type Actor,HttpError,id,iso,unix,rows} from './types';
 import {handoverHistory} from './handover-history';
+import {isPickup} from '../src/notice';
 import {sha256} from './security';
-// D1 batch 內共用一個有效性閘門；任一筆版本改變便整批拒絕。沿用請求帳本，無須新增 Migration。
+// D1 batch 內共用一個有效性閘門；任一筆版本改變便整批拒絕。沿用既有請求帳本，搭配 0003 的自填物品欄位。
 export async function pickupCommand(env:Env,actor:Actor,action:string,p:any){
  if(action==='handover_history')return handoverHistory(env,actor,p);
  if(!['pickup_many','undo_many','notification_preflight'].includes(action))return undefined;
@@ -9,7 +10,7 @@ export async function pickupCommand(env:Env,actor:Actor,action:string,p:any){
  if(action==='notification_preflight'){
   if(!Array.isArray(p.teacher_ids)||p.teacher_ids.length<1||p.teacher_ids.length>100)throw new HttpError(400,'每批限 1 至 100 位教師');
   const ids=[...new Set(p.teacher_ids.map(id))];
-  const pending=await rows(db.prepare(`SELECT n.teacher_id,t.name,count(*) AS count FROM notifications n JOIN teachers t ON t.id=n.teacher_id WHERE n.teacher_id IN (SELECT value FROM json_each(?)) AND n.kind IN ('mail','parcel') AND n.status='待領取' GROUP BY n.teacher_id`).bind(JSON.stringify(ids)));
+  const pending=await rows(db.prepare(`SELECT n.teacher_id,t.name,count(*) AS count FROM notifications n JOIN teachers t ON t.id=n.teacher_id WHERE n.teacher_id IN (SELECT value FROM json_each(?)) AND (n.kind IN ('mail','parcel') OR n.pickup_name IS NOT NULL) AND n.status='待領取' GROUP BY n.teacher_id`).bind(JSON.stringify(ids)));
   return {pending};
  }
  const request=id(p.request_id),isUndo=action==='undo_many';
@@ -30,14 +31,14 @@ export async function pickupCommand(env:Env,actor:Actor,action:string,p:any){
   if(existing){if(existing.actor_id!==actor.id||existing.fingerprint!==fingerprint)throw new HttpError(409,'重複請求內容不一致');return {already_applied:true};}
   const found=await rows(db.prepare(`SELECT * FROM notifications WHERE id IN (SELECT json_extract(value,'$.id') FROM json_each(?))`).bind(JSON.stringify(items)));
   if(found.length!==items.length)throw new HttpError(409,'領件紀錄已變更，請重新確認');
-  entries=items.map((item:any)=>{const n=found.find(n=>n.id===item.id)!;if(n.teacher_id!==teacherId||!['mail','parcel'].includes(n.kind)||n.status!=='待領取'||n.version!==item.version)throw new HttpError(409,'領件紀錄已變更，請重新確認');return {id:n.id,version:n.version,op:'',before_data:JSON.stringify({status:n.status,completed_at:n.completed_at,completed_by:n.completed_by})};});
+  entries=items.map((item:any)=>{const n=found.find(n=>n.id===item.id)!;if(n.teacher_id!==teacherId||!isPickup(n)||n.status!=='待領取'||n.version!==item.version)throw new HttpError(409,'領件紀錄已變更，請重新確認');return {id:n.id,version:n.version,op:'',before_data:JSON.stringify({status:n.status,completed_at:n.completed_at,completed_by:n.completed_by})};});
  }
  const existing=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();
  if(existing){if(existing.actor_id!==actor.id||existing.fingerprint!==fingerprint)throw new HttpError(409,'重複請求內容不一致');return {already_applied:true};}
  if(isUndo&&entries.some(e=>e.used_at||e.expires_at<=unix()||e.after_version!==e.version||e.operation_token!==e.id))throw new HttpError(409,'紀錄已更新、逾期或已復原，請查看最新紀錄');
  for(const e of entries)e.op=await sha256(request+':'+(isUndo?e.target_id:e.id));
  const json=JSON.stringify(entries),expiry=unix()+60;
- const valid=isUndo?`SELECT count(*) FROM json_each(?) j JOIN undo_actions u ON u.id=json_extract(j.value,'$.id') JOIN notifications n ON n.id=u.target_id WHERE u.actor_id=? AND u.used_at IS NULL AND u.expires_at>? AND u.target_type='notification' AND n.version=u.after_version AND n.operation_token=u.id`:`SELECT count(*) FROM json_each(?) j JOIN notifications n ON n.id=json_extract(j.value,'$.id') WHERE n.teacher_id=? AND n.kind IN ('mail','parcel') AND n.status='待領取' AND n.version=json_extract(j.value,'$.version')`;
+ const valid=isUndo?`SELECT count(*) FROM json_each(?) j JOIN undo_actions u ON u.id=json_extract(j.value,'$.id') JOIN notifications n ON n.id=u.target_id WHERE u.actor_id=? AND u.used_at IS NULL AND u.expires_at>? AND u.target_type='notification' AND n.version=u.after_version AND n.operation_token=u.id`:`SELECT count(*) FROM json_each(?) j JOIN notifications n ON n.id=json_extract(j.value,'$.id') WHERE n.teacher_id=? AND (n.kind IN ('mail','parcel') OR n.pickup_name IS NOT NULL) AND n.status='待領取' AND n.version=json_extract(j.value,'$.version')`;
  const args=isUndo?[json,actor.id,unix()]:[json,teacherId];
  const ledger=db.prepare(`INSERT INTO send_requests(id,actor_id,fingerprint,created_at) SELECT ?,?,?,? WHERE (${valid})=? ON CONFLICT(id) DO NOTHING`).bind(request,actor.id,fingerprint,now,...args,entries.length);
  const gate=`EXISTS(SELECT 1 FROM send_requests WHERE id=? AND actor_id=? AND fingerprint=?)`;

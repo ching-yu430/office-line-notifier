@@ -20,12 +20,12 @@ export async function notificationHistory(env:Env,actor:Actor,params:URLSearchPa
   if(send==='attention')where.push("n.send_status IN ('failed','uncertain')");
   else{if(!['queued','sending','accepted','failed','uncertain'].includes(send))throw new HttpError(400,'發送結果錯誤');where.push('n.send_status=?');args.push(send);}
  }
- if(query){where.push("instr(lower(t.name || ' ' || n.content),lower(?))>0");args.push(query);}
+ if(query){where.push("instr(lower(t.name || ' ' || n.content || ' ' || coalesce(n.pickup_name,'')),lower(?))>0");args.push(query);}
  if(from){where.push('coalesce(n.sent_at,n.created_at)>=?');args.push(boundary(from));}
  if(to){where.push('coalesce(n.sent_at,n.created_at)<?');args.push(boundary(to,true));}
  if(from&&to&&from>to)throw new HttpError(400,'起始日期需早於或等於結束日期');
  const source=' FROM notifications n JOIN teachers t ON t.id=n.teacher_id'+(where.length?' WHERE '+where.join(' AND '):'');
- const fields=`SELECT n.id,n.teacher_id,n.kind,n.content,n.important,n.sender_id,n.send_status,n.status,n.error_code,n.created_at,n.sent_at,n.completed_at,n.completed_by,n.version,
+ const fields=`SELECT n.id,n.teacher_id,n.kind,n.pickup_name,n.content,n.important,n.sender_id,n.send_status,n.status,n.error_code,n.created_at,n.sent_at,n.completed_at,n.completed_by,n.version,
   (SELECT content FROM messages WHERE teacher_id=n.teacher_id AND direction='in' ORDER BY created_at DESC,rowid DESC LIMIT 1) AS latest_reply,
   (SELECT created_at FROM messages WHERE teacher_id=n.teacher_id AND direction='in' ORDER BY created_at DESC,rowid DESC LIMIT 1) AS latest_reply_at`;
  const select=(page:number)=>env.DB.prepare(fields+source+' ORDER BY coalesce(n.sent_at,n.created_at) DESC,n.id DESC LIMIT 10 OFFSET ?').bind(...args,(page-1)*10);

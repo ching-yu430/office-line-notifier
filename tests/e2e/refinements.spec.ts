@@ -1,3 +1,4 @@
+import {openPickups,openNotes,openDemoTools} from './chat-tools';
 import {test,expect,type Page} from '@playwright/test';
 async function openChat(page:Page){await page.getByRole('button',{name:/^訊息中心/}).click();const back=page.getByRole('button',{name:'返回教師列表'});if(await back.isVisible())await back.click();await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();}
 
@@ -25,7 +26,7 @@ test('聊天 Enter 換行，Ctrl Enter 才送出並保留換行內容',async({pa
 
 test('閱讀舊訊息時不自動拉到底，新訊息保留未查看並可跳到最新',async({page})=>{
  await page.goto('/');await openChat(page);await page.evaluate(()=>{const data=JSON.parse(localStorage.getItem('office-line-demo-v1')!);data.messages=Array.from({length:70},(_,i)=>({id:'history-'+i,teacher_id:'demo-1',direction:'in',content:'歷史訊息 '+i,created_at:new Date(Date.now()-(70-i)*60000).toISOString()}));localStorage.setItem('office-line-demo-v1',JSON.stringify(data));window.dispatchEvent(new Event('office-refresh'));});await expect(page.locator('.messages .message')).toHaveCount(70);const feed=page.locator('.messages');
- await feed.evaluate(el=>{el.scrollTop=0;el.dispatchEvent(new Event('scroll'));});await page.getByLabel('模擬老師回覆').fill('剛收到的新問題');await page.getByRole('button',{name:'模擬接收'}).click();await expect(page.getByRole('button',{name:'1 則新訊息，查看最新'})).toBeVisible();expect(await feed.evaluate(el=>el.scrollTop)).toBeLessThan(40);await expect(page.getByLabel('示範教師甲有 1 則未查看訊息')).toBeVisible();
+ await feed.evaluate(el=>{el.scrollTop=0;el.dispatchEvent(new Event('scroll'));});await openDemoTools(page);await page.getByLabel('模擬老師回覆').fill('剛收到的新問題');await page.getByRole('button',{name:'模擬接收'}).click();await expect(page.getByRole('button',{name:'1 則新訊息，查看最新'})).toBeVisible();expect(await feed.evaluate(el=>el.scrollTop)).toBeLessThan(40);await expect(page.getByLabel('示範教師甲有 1 則未查看訊息')).toBeVisible();
  await page.getByRole('button',{name:'1 則新訊息，查看最新'}).click();await expect(page.getByLabel('示範教師甲有 1 則未查看訊息')).toHaveCount(0);expect(await feed.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeLessThan(80);
 });
 

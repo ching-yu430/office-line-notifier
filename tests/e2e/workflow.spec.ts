@@ -1,3 +1,4 @@
+import {openPickups,openNotes,openDemoTools} from './chat-tools';
 import{test,expect}from'@playwright/test';
 test('桌面：綁定、通知、教師回覆與結案',async({page})=>{
  await page.goto('/');await expect(page.getByRole('heading',{name:'值班工作台'})).toBeVisible();
@@ -9,7 +10,7 @@ test('桌面：綁定、通知、教師回覆與結案',async({page})=>{
  await page.getByRole('button',{name:'發送通知',exact:true}).click();
  await page.locator('.teacher-option').filter({hasText:'示範教師乙'}).getByRole('checkbox').check();
  await page.getByRole('button',{name:'包裹通知',exact:true}).click();await page.getByRole('button',{name:'預覽通知'}).click();await expect(page.getByRole('dialog')).toContainText('示範教師乙');await page.getByRole('button',{name:'確認發送給 1 位教師'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
- await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師乙'}).click();await page.getByLabel('模擬老師回覆').fill('我下班前會去領取，謝謝！');await page.getByRole('button',{name:'模擬接收'}).click();await expect(page.locator('.messages')).toContainText('我下班前會去領取，謝謝！');
+ await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師乙'}).click();await openDemoTools(page);await page.getByLabel('模擬老師回覆').fill('我下班前會去領取，謝謝！');await page.getByRole('button',{name:'模擬接收'}).click();await expect(page.locator('.messages')).toContainText('我下班前會去領取，謝謝！');
  await page.getByLabel('回覆老師',{exact:true}).fill('好的，辦公室等您。');await page.getByRole('button',{name:'送出',exact:true}).click();await expect(page.locator('.messages')).toContainText('好的，辦公室等您。');
  await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await page.getByLabel('教師篩選').selectOption({label:'示範教師乙'});await page.getByLabel('更新示範教師乙處理狀態').first().selectOption('已完成');await expect(page.getByLabel('更新示範教師乙處理狀態').first()).toHaveValue('已完成');
 });
@@ -17,8 +18,8 @@ test('一般行政無法管理教師或產生綁定碼',async({page})=>{await pa
 test('直接回覆自動改為已回覆，老師再傳訊息重新待回覆，包裹保持待領取',async({page})=>{
  await page.goto('/');await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();
  await expect(page.getByLabel('回覆後完成對話')).toHaveCount(0);await page.getByLabel('回覆老師',{exact:true}).fill('辦公室回覆');await page.getByRole('button',{name:'送出',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByLabel('對話處理狀態')).toHaveValue('已完成');await expect(page.getByLabel('對話處理狀態').locator('option:checked')).toHaveText('已回覆');
- await page.getByLabel('模擬老師回覆').fill('另一個問題');await page.getByRole('button',{name:'模擬接收'}).click();await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
- await expect(page.locator('.chat-pickups')).toContainText('包裹通知');await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await expect(page.getByRole('row').filter({hasText:'您的包裹已送達辦公室'})).toContainText('待領取');await expect(page.locator('body')).not.toContainText('API 已接受');
+ await openDemoTools(page);await page.getByLabel('模擬老師回覆').fill('另一個問題');await page.getByRole('button',{name:'模擬接收'}).click();await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
+ await openPickups(page);await expect(page.locator('.chat-pickups')).toContainText('包裹通知');await page.getByRole('button',{name:'通知紀錄',exact:true}).click();await expect(page.getByRole('row').filter({hasText:'您的包裹已送達辦公室'})).toContainText('待領取');await expect(page.locator('body')).not.toContainText('API 已接受');
  await page.reload();await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
 });
 test('手機：主要頁面可操作且無整頁水平溢出',async({page})=>{await page.setViewportSize({width:390,height:844});await page.goto('/');await expect(page.getByRole('heading',{name:'值班工作台'})).toBeVisible();expect((await page.locator('nav').boundingBox())!.height).toBeLessThan(100);for(const name of ['教師名單','發送通知','訊息中心','通知紀錄','系統管理']){await page.getByRole('button',{name:name==='訊息中心'?/^訊息中心/:name,exact:name!=='訊息中心'}).click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);}});
@@ -74,9 +75,9 @@ test('系統管理：左右配置、兩種紀錄獨立篩選、分頁與固定�
 
 test('對話內部備註：獨立保存、切換教師與重新整理，不混入 LINE 訊息',async({page})=>{
  await page.goto('/');await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師甲'}).click();const count=await page.locator('.messages .message').count();
- await page.locator('.internal-notes summary').click();await page.getByLabel('新增內部備註',{exact:true}).fill('老師請下午再聯絡，僅供辦公室交接。');await page.getByRole('button',{name:'儲存內部備註',exact:true}).click();await expect(page.locator('.internal-note-list')).toContainText('老師請下午再聯絡，僅供辦公室交接。');await expect(page.locator('.messages')).not.toContainText('僅供辦公室交接');await expect(page.locator('.messages .message')).toHaveCount(count);
- await page.locator('.chat-list button').filter({hasText:'示範教師丙'}).click();await expect(page.locator('.internal-note-list')).not.toContainText('老師請下午再聯絡');
- await page.reload();await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師甲'}).click();await page.locator('.internal-notes summary').click();await expect(page.locator('.internal-note-list')).toContainText('老師請下午再聯絡');await expect(page.locator('.internal-note-list')).toContainText('示範管理員');
+ await openNotes(page);await page.getByLabel('新增內部備註',{exact:true}).fill('老師請下午再聯絡，僅供辦公室交接。');await page.getByRole('button',{name:'儲存內部備註',exact:true}).click();await expect(page.locator('.internal-note-list')).toContainText('老師請下午再聯絡，僅供辦公室交接。');await expect(page.locator('.messages')).not.toContainText('僅供辦公室交接');await expect(page.locator('.messages .message')).toHaveCount(count);
+ await page.locator('.chat-list button').filter({hasText:'示範教師丙'}).click();await openNotes(page);await expect(page.locator('.internal-note-list')).not.toContainText('老師請下午再聯絡');
+ await page.reload();await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-list button').filter({hasText:'示範教師甲'}).click();await openNotes(page);await expect(page.locator('.internal-note-list')).toContainText('老師請下午再聯絡');await expect(page.locator('.internal-note-list')).toContainText('示範管理員');
 });
 
 test('交接更正與恢復：姓名、內容、完成狀態與修改前後紀錄',async({page})=>{

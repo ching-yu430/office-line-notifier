@@ -56,8 +56,15 @@ export default {
     if(!await env.DB.prepare('SELECT id FROM teachers WHERE id=?').bind(tid).first())throw new HttpError(404,'找不到教師');
     const results=await env.DB.batch([
      env.DB.prepare(`SELECT m.id,m.teacher_id,m.direction,m.content,m.message_type,m.created_at,m.notification_id,m.withdrawn,a.display_name AS sender_name FROM (SELECT * FROM messages WHERE teacher_id=? ORDER BY rowid DESC LIMIT 200) m LEFT JOIN notifications n ON n.id=m.notification_id LEFT JOIN admins a ON a.id=n.sender_id ORDER BY m.created_at,m.id`).bind(tid),
-     env.DB.prepare("SELECT * FROM notifications WHERE teacher_id=? AND kind IN ('mail','parcel') AND status='待領取' ORDER BY created_at DESC LIMIT 200").bind(tid)
+     env.DB.prepare("SELECT * FROM notifications WHERE teacher_id=? AND (kind IN ('mail','parcel') OR pickup_name IS NOT NULL) AND status='待領取' ORDER BY created_at DESC LIMIT 200").bind(tid)
     ]);return json({messages:results[0].results,pickups:results[1].results});
+   }
+   // 高頻檢查只讀一列版本；不查聊天歷史、不清理資料、不呼叫 LINE。
+   if(path==='/api/changes'&&req.method==='GET'){
+    const version=(await env.DB.prepare('SELECT version FROM system_meta WHERE id=1').first<{version:number}>())!.version;
+    const etag=`"${s.id}-${s.role}-${version}"`;headers.set('ETag',etag);
+    if(req.headers.get('if-none-match')===etag)return new Response(null,{status:304,headers});
+    return json({changed:true});
    }
    if(path==='/api/data'&&req.method==='GET'){
     await recover(env.DB);
@@ -68,7 +75,7 @@ export default {
     const names=['teachers','notifications','messages','staff','templates','audit_logs','conversations','handovers','internal_notes','handover_revisions','inbox','presence'];
     // 不向瀏覽器暴露 LINE User ID、密碼雜湊、Session、綁定碼雜湊。
     const queries=[
-     'SELECT id,name,department,notes,active,bound_at,last_notified_at FROM teachers ORDER BY name LIMIT 1000',
+     'SELECT id,name,department,notes,active,bound_at,last_notified_at,conversation_version FROM teachers ORDER BY name LIMIT 1000',
      'SELECT * FROM notifications ORDER BY created_at DESC LIMIT 500',
      'SELECT id,teacher_id,direction,content,message_type,created_at,line_event_id,line_message_id,notification_id,withdrawn,processing_status FROM (SELECT * FROM messages ORDER BY created_at DESC LIMIT 500) ORDER BY created_at',
      s.role==='admin'?'SELECT id,username,display_name,role,active FROM admins ORDER BY created_at':'SELECT id,display_name,role,active FROM admins ORDER BY created_at',

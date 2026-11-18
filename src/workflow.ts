@@ -1,8 +1,9 @@
 import type {Data,Notice} from './api';
-export const kindLabel:Record<string,string>={mail:'實體信件',parcel:'包裹通知',contact:'行政聯絡',custom:'自訂訊息',reply:'聊天回覆'};
-export function noticeStatus(n:Pick<Notice,'kind'|'status'>){
+export {kindLabel} from './notice';
+import {isPickup} from './notice';
+export function noticeStatus(n:Pick<Notice,'kind'|'status'|'pickup_name'>){
  if(n.status!=='已完成')return n.status;
- return ['mail','parcel'].includes(n.kind)?'已領取':n.kind==='reply'?'已回覆':'已處理';
+ return isPickup(n)?'已領取':n.kind==='reply'?'已回覆':'已處理';
 }
 export function failureText(code?:string|null){
  if(code==='line_http_401'||code==='line_http_403')return 'LINE 連線設定需要更新，請通知管理員檢查。';

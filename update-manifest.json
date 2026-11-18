@@ -1,0 +1,84 @@
+{
+  "version": "2026.11.18.2",
+  "base_commit": "0681ce8",
+  "source_commit": "fbdfeb97a62ccda834bff822699bbd0edd0aec9e",
+  "contains_previous_updates": [
+    "2026.11.17.3",
+    "2026.11.18.1"
+  ],
+  "update": {
+    "file": "office-line-notifier-combined-update.zip",
+    "bytes": 152492,
+    "sha256": "402455ad3bd9dbcb2225128f319ae3450281739e1345debc49a5a8312628eccd",
+    "files": [
+      "docs/BINDING-DESK-UPDATE.md",
+      "docs/CONVERSATION-UPDATE.md",
+      "docs/TEST-REPORT.md",
+      "migrations/0003_pickup_items.sql",
+      "package-lock.json",
+      "package.json",
+      "scripts/build-preview.mjs",
+      "src/BatchPickup.tsx",
+      "src/BindingCard.tsx",
+      "src/ConversationStatus.tsx",
+      "src/DuplicateWarning.tsx",
+      "src/HandoverList.tsx",
+      "src/MessageCenter.tsx",
+      "src/NoticeIcon.tsx",
+      "src/NotificationComposer.tsx",
+      "src/NotificationHistory.tsx",
+      "src/QuickNotice.tsx",
+      "src/RecordHistory.tsx",
+      "src/api.ts",
+      "src/main.tsx",
+      "src/notice.ts",
+      "src/page-memory.ts",
+      "src/polling.ts",
+      "src/refinements.css",
+      "src/version.ts",
+      "src/workflow.ts",
+      "tests/api-cache.test.ts",
+      "tests/e2e/binding-desk.spec.ts",
+      "tests/e2e/chat-tools.ts",
+      "tests/e2e/cloudflare.spec.ts",
+      "tests/e2e/conversation-cleanup.spec.ts",
+      "tests/e2e/html-preview.spec.ts",
+      "tests/e2e/refinements.spec.ts",
+      "tests/e2e/usability.spec.ts",
+      "tests/e2e/workflow.spec.ts",
+      "tests/migration-upgrade.test.ts",
+      "tests/polling.test.ts",
+      "tests/worker.test.ts",
+      "worker/binding-link.ts",
+      "worker/commands.ts",
+      "worker/handover-history.ts",
+      "worker/index.ts",
+      "worker/notification-history.ts",
+      "worker/pickups.ts",
+      "worker/workflow.ts"
+    ]
+  },
+  "html_preview": {
+    "file": "office-line-notifier-html-preview.zip",
+    "bytes": 679393,
+    "sha256": "f6364bf3d42de46c81ae576028549be35cc05f1beed64ca96dc8d9e99cdcd914",
+    "files": [
+      "office-line-notifier-preview.html"
+    ]
+  },
+  "html": {
+    "file": "office-line-notifier-preview.html",
+    "bytes": 1186590,
+    "sha256": "0438a4047d9d49f3f66fd193ab901848612f7b7cdf55218dc6aa3208daaeae3b"
+  },
+  "tests": {
+    "unit_integration": 77,
+    "browser": 42,
+    "cloudflare_build": "passed"
+  },
+  "migrations_required_if_not_applied": [
+    "0003_pickup_items.sql"
+  ],
+  "production_deployed": false,
+  "line_http": "Mock"
+}

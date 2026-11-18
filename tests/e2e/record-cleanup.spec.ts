@@ -1,3 +1,4 @@
+import {openSettingsTab} from './settings-tools';
 import {test,expect,type Page} from '@playwright/test';
 async function seed(page:Page){
  await page.goto('/');await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();
@@ -8,7 +9,7 @@ async function seed(page:Page){
   d.conversations=[{teacher_id:'demo-3',status:'已完成'},{teacher_id:'demo-1',status:'待回覆'}];d.undo_actions=[];
   const h={id:'done-handover',content:'虛構已完成交接',handover_name:'虛構交接人',created_by:'demo-admin',creator_name:'示範管理員',created_at:old,completed_at:old,completed_by:'demo-admin',completed_name:'示範管理員',finisher_name:'虛構完成人',version:1};
   d.handovers=[h,{...h,id:'pending-handover',content:'保留待交接',completed_at:null,completed_by:null,finisher_name:null}];d.handover_revisions=[{id:'old-revision',handover_id:h.id,created_at:old,after_data:h}];d.audit_logs=[{id:'old-log',actor_id:'demo-admin',action:'login',created_at:old}];localStorage.setItem('office-line-demo-v1',JSON.stringify(d));window.dispatchEvent(new Event('office-refresh'));
- });await page.getByRole('button',{name:'系統管理',exact:true}).click();await page.getByRole('button',{name:'紀錄清理',exact:true}).click();return page.locator('.record-cleanup');
+ });await page.getByRole('button',{name:'系統管理',exact:true}).click();await openSettingsTab(page,'maintenance');return page.locator('.record-cleanup');
 }
 test('管理員依日期預覽再確認清理，保留待辦、教師與最後訊息，桌面及手機可操作',async({page},info)=>{
  const panel=await seed(page);await panel.getByLabel('清理日期').fill('2026-01-01');await panel.getByLabel('舊操作紀錄',{exact:true}).check();await panel.getByRole('button',{name:'預覽可清理紀錄'}).click();const confirmation=panel.getByRole('group',{name:'清理確認'});await expect(confirmation.locator('.cleanup-counts b')).toHaveText(['1 筆','1 則','1 筆','1 筆']);await expect(confirmation.getByRole('button',{name:'確認永久刪除'})).toBeDisabled();
@@ -21,5 +22,5 @@ test('清理預覽期間收到新訊息，要求重新預覽且沒有部分刪�
  const panel=await seed(page);await panel.getByLabel('清理日期').fill('2026-01-01');await panel.getByRole('button',{name:'預覽可清理紀錄'}).click();await page.evaluate(()=>{const d=JSON.parse(localStorage.getItem('office-line-demo-v1')!);d.conversations.find((c:any)=>c.teacher_id==='demo-3').status='待回覆';d.messages.push({id:'new-inbound',teacher_id:'demo-3',direction:'in',content:'新的待回覆',created_at:new Date().toISOString()});localStorage.setItem('office-line-demo-v1',JSON.stringify(d));window.dispatchEvent(new Event('office-refresh'));});await panel.getByLabel('刪除確認文字').fill('刪除紀錄');await panel.getByRole('button',{name:'確認永久刪除'}).click();await expect(panel.getByRole('alert')).toContainText('尚未刪除任何資料');expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('office-line-demo-v1')!).messages.length)).toBe(3);
 });
 test('一般行政不顯示清理功能，沒有符合條件時不出現刪除按鈕',async({page})=>{
- await page.goto('/');await page.getByRole('button',{name:'系統管理',exact:true}).click();const panel=page.locator('.record-cleanup');await page.getByRole('button',{name:'紀錄清理',exact:true}).click();await panel.getByRole('button',{name:'預覽可清理紀錄'}).click();await expect(panel).toContainText('沒有符合條件');await expect(panel.getByRole('button',{name:'確認永久刪除'})).toHaveCount(0);await page.getByRole('button',{name:'切換為行政人員'}).click();await expect(page.locator('.record-cleanup')).toHaveCount(0);await expect(page.getByRole('button',{name:'系統管理',exact:true})).toHaveCount(0);
+ await page.goto('/');await page.getByRole('button',{name:'系統管理',exact:true}).click();const panel=page.locator('.record-cleanup');await openSettingsTab(page,'maintenance');await panel.getByRole('button',{name:'預覽可清理紀錄'}).click();await expect(panel).toContainText('沒有符合條件');await expect(panel.getByRole('button',{name:'確認永久刪除'})).toHaveCount(0);await page.getByRole('button',{name:'切換為行政人員'}).click();await expect(page.locator('.record-cleanup')).toHaveCount(0);await expect(page.getByRole('button',{name:'系統管理',exact:true})).toHaveCount(0);
 });

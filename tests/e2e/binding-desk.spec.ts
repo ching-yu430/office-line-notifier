@@ -1,3 +1,4 @@
+import {openSettingsTab} from './settings-tools';
 import {openPickups,openNotes,openDemoTools} from './chat-tools';
 import {test,expect,type Page} from '@playwright/test';
 async function prepare(page:Page){await page.goto('/');await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();}
@@ -10,8 +11,8 @@ test('交接預設三筆，可展開收合並搜尋未顯示的內容及交接�
  await page.setViewportSize({width:390,height:844});expect(await list.locator('.handover-row p').first().evaluate(el=>getComputedStyle(el).fontSize)).toBe('17px');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await list.screenshot({path:info.outputPath('mobile-handovers.png'),animations:'disabled'});
 });
 
-test('系統管理已完成交接可搜尋完成人，離頁後保留搜尋及收合狀態',async({page})=>{
- await prepare(page);await seedHandovers(page);await page.getByRole('button',{name:'系統管理',exact:true}).click();const list=page.locator('.handover-history');await list.locator('summary').click();await page.getByLabel('搜尋交接紀錄').fill('完成人7');await expect(list.locator('.handover-row')).toHaveCount(1);await expect(list).toContainText('交接事項 7');await page.getByRole('button',{name:'值班工作台',exact:true}).click();await page.getByRole('button',{name:'系統管理',exact:true}).click();await expect(page.getByLabel('搜尋交接紀錄')).toHaveValue('完成人7');await expect(list.locator('.handover-row')).toHaveCount(1);
+test('系統管理已完成交接可搜尋完成人，離頁後保留搜尋及分類頁籤',async({page})=>{
+ await prepare(page);await seedHandovers(page);await page.getByRole('button',{name:'系統管理',exact:true}).click();const list=page.locator('.handover-history');await openSettingsTab(page,'records');await page.getByLabel('搜尋交接紀錄').fill('完成人7');await expect(list.locator('.handover-row')).toHaveCount(1);await expect(list).toContainText('交接事項 7');await page.getByRole('button',{name:'值班工作台',exact:true}).click();await page.getByRole('button',{name:'系統管理',exact:true}).click();await expect(page.getByLabel('搜尋交接紀錄')).toHaveValue('完成人7');await expect(list.locator('.handover-row')).toHaveCount(1);
 });
 
 test('個人綁定 QR 在本機產生、僅預覽連結、不外傳綁定碼',async({page},info)=>{

@@ -1,0 +1,96 @@
+{
+  "version": "2026.11.18.4",
+  "base_commit": "0681ce8",
+  "source_commit": "69a01c4316fd2be35d4869fb4456758d8562070f",
+  "contains_previous_updates": [
+    "2026.11.17.3",
+    "2026.11.18.1",
+    "2026.11.18.2",
+    "2026.11.18.3"
+  ],
+  "update": {
+    "file": "office-line-notifier-combined-update.zip",
+    "bytes": 187146,
+    "sha256": "3185447ee85441854125697f1d0464d0dedb2f8cb25333cd7d755d3593cac3e7",
+    "files": [
+      "docs/ARCHITECTURE.md",
+      "docs/BINDING-DESK-UPDATE.md",
+      "docs/CONVERSATION-UPDATE.md",
+      "docs/OPERATIONS.md",
+      "docs/RECORD-CLEANUP.md",
+      "docs/TEST-REPORT.md",
+      "migrations/0003_pickup_items.sql",
+      "migrations/0004_record_cleanup.sql",
+      "package-lock.json",
+      "package.json",
+      "scripts/build-preview.mjs",
+      "src/BatchPickup.tsx",
+      "src/BindingCard.tsx",
+      "src/ConversationStatus.tsx",
+      "src/DuplicateWarning.tsx",
+      "src/HandoverList.tsx",
+      "src/MessageCenter.tsx",
+      "src/NoticeIcon.tsx",
+      "src/NotificationComposer.tsx",
+      "src/NotificationHistory.tsx",
+      "src/QuickNotice.tsx",
+      "src/RecordCleanup.tsx",
+      "src/RecordHistory.tsx",
+      "src/api.ts",
+      "src/cleanup.ts",
+      "src/main.tsx",
+      "src/mock-cleanup.ts",
+      "src/notice.ts",
+      "src/page-memory.ts",
+      "src/polling.ts",
+      "src/refinements.css",
+      "src/version.ts",
+      "src/workflow.ts",
+      "tests/api-cache.test.ts",
+      "tests/e2e/binding-desk.spec.ts",
+      "tests/e2e/chat-tools.ts",
+      "tests/e2e/cloudflare.spec.ts",
+      "tests/e2e/conversation-cleanup.spec.ts",
+      "tests/e2e/html-preview.spec.ts",
+      "tests/e2e/record-cleanup.spec.ts",
+      "tests/e2e/refinements.spec.ts",
+      "tests/e2e/usability.spec.ts",
+      "tests/e2e/workflow.spec.ts",
+      "tests/migration-upgrade.test.ts",
+      "tests/polling.test.ts",
+      "tests/worker.test.ts",
+      "worker/binding-link.ts",
+      "worker/commands.ts",
+      "worker/handover-history.ts",
+      "worker/index.ts",
+      "worker/notification-history.ts",
+      "worker/pickups.ts",
+      "worker/record-cleanup.ts",
+      "worker/workflow.ts"
+    ]
+  },
+  "html_preview": {
+    "file": "office-line-notifier-html-preview.zip",
+    "bytes": 683936,
+    "sha256": "f23b9392421ecc9e68a5758bf551c8d665cbe0d597be61325bf110082de1b867",
+    "files": [
+      "office-line-notifier-preview.html"
+    ]
+  },
+  "html": {
+    "file": "office-line-notifier-preview.html",
+    "bytes": 1201912,
+    "sha256": "6511226404b763c591c122cd717824d494668e027d44e7c6fc07abd3047059c7"
+  },
+  "tests": {
+    "unit_integration": 86,
+    "browser": 47,
+    "cloudflare_build": "passed"
+  },
+  "migrations_required_if_not_applied": [
+    "0003_pickup_items.sql",
+    "0004_record_cleanup.sql"
+  ],
+  "production_deployed": false,
+  "line_http": "Mock"
+}

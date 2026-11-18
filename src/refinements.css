@@ -46,6 +46,27 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #d4
 @media(max-width:1000px){.conversation-tools{position:absolute;right:0;top:0;bottom:0;width:min(320px,90%);z-index:4;box-shadow:-8px 0 24px #71572018}.conversation-header-tools button>span:not(.count){display:inline}}
 @media(max-width:700px){.chat-layout{grid-template-columns:minmax(0,1fr);height:auto;min-height:0;overflow:hidden}.chat-layout.has-conversation .conversation{height:calc(100dvh - 24px);min-height:460px}.conversation .chat-heading{padding:13px 12px;gap:7px}.chat-heading>div:first-of-type>b{font-size:15px}.conversation-header-tools{gap:0}.conversation-header-tools button{padding:7px}.conversation-header-tools button>span:not(.count){display:none}.chat-heading select{padding:7px 6px;font-size:12px;max-width:83px}.conversation .messages{padding:20px 15px}.message>div{font-size:14px;line-height:1.85}.composer-tools{padding:10px 13px 0;gap:6px}.composer-tools .attachment-hint{font-size:12px}.conversation .reply-input{padding:10px 13px 14px}.reply-draft textarea{font-size:15px;min-height:72px}.conversation-tools{width:calc(100% - 22px)}.conversation-tools .chat-pickups>div{padding-left:17px;padding-right:17px}.chat-demo-tools>summary{padding:7px 13px}.page-heading{margin-top:21px;margin-bottom:18px}.typing-presence{padding:7px 13px}}
 
+/* 紀錄清理沿用暖黃色卡片，危險操作使用低飽和暖褐色。 */
+.record-cleanup{margin-top:24px}.record-cleanup>h2{display:flex;align-items:center;gap:8px}
+.cleanup-description,.cleanup-retained,.cleanup-preview>p,.cleanup-success>p{font-size:13px;color:#75674f;line-height:1.8;margin-top:12px}
+.cleanup-options{display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-top:20px}
+.cleanup-options .cleanup-date{margin:0;font-size:13px;max-width:260px;flex:0 1 260px}.cleanup-date input{display:block;margin-top:8px;width:100%}
+.cleanup-scopes{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-bottom:8px}
+.cleanup-scopes label{display:flex;align-items:center;gap:7px;font-size:13px;margin:0;min-height:30px}
+.cleanup-scopes input[type=checkbox]{width:16px;height:16px;margin:0;flex-shrink:0}
+.cleanup-options>.outline{margin-left:auto;min-height:43px}.cleanup-retained{margin-bottom:0}
+.cleanup-preview,.cleanup-success{margin-top:20px;padding:20px;border:1px solid #e4d5b1;background:#fcf8ec;border-radius:10px}
+.cleanup-preview h3,.cleanup-success h3{font-size:15px;margin:0;color:#5b4c30}
+.cleanup-counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:17px}
+.cleanup-counts>div{padding:12px 15px;border:1px solid #e9dfc9;background:#fffefa;border-radius:8px;min-width:0}
+.cleanup-counts span{font-size:12px;color:#7b6b4d;display:block}.cleanup-counts b{font-size:24px;font-weight:600;display:block;margin-top:6px}.cleanup-counts small{display:inline;font-size:12px;font-weight:400}
+.cleanup-confirm-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:15px 0 10px}
+.cleanup-confirm-actions>input{width:210px;max-width:100%}.cleanup-delete{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #b77e62;border-radius:8px;padding:12px 17px;color:#874e35;background:#faeee5;min-height:43px}
+.cleanup-delete:hover:enabled{background:#f4e1d4}.cleanup-warning{color:#885b3f!important}.cleanup-preview>small{font-size:12px;color:#75674f}
+.cleanup-success{border-color:#d7deca;background:#f5f7ef}.cleanup-audit-detail{display:block;white-space:normal;line-height:1.7;max-width:360px;margin-top:5px}
+.cleanup-demo-tools{border-top:1px dashed #e7dcc3;margin-top:18px;padding-top:12px;font-size:12px;color:#8c7545}.cleanup-demo-tools summary{cursor:pointer}.cleanup-demo-tools button{margin-top:12px;font-size:12px}
+@media(max-width:700px){.cleanup-options{gap:14px}.cleanup-options .cleanup-date{flex-basis:100%;max-width:none}.cleanup-options>.outline{margin:0}.cleanup-scopes{gap:8px 14px}.cleanup-preview,.cleanup-success{padding:15px}.cleanup-counts{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.cleanup-confirm-actions>input{width:100%}.cleanup-confirm-actions{gap:10px}.cleanup-audit-detail{max-width:none}}
+
 /* 交接操作同列排列，保留大字內容並減少每筆留白。 */
 .handover-row{padding:15px 23px;gap:18px}
 .handover-row small{margin-top:5px}

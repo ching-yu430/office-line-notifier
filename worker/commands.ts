@@ -7,8 +7,10 @@ import {isPickup} from '../src/notice';
 import {resolveBindingLink} from './binding-link';
 import {pickupCommand} from './pickups';
 import{APP_VERSION}from'../src/version';
+import {recordCleanup} from './record-cleanup';
 export async function command(env:Env,actor:Actor,action:string,p:any){
  const db=env.DB,now=iso();
+ const cleanup=await recordCleanup(env,actor,action,p);if(cleanup!==undefined)return cleanup;
  const pickup=await pickupCommand(env,actor,action,p);if(pickup!==undefined)return pickup;
  const result=await workflowCommand(env,actor,action,p);if(result!==undefined)return result;
  if(['teacher_save','issue_code','unbind','staff_save','template_save','system_status'].includes(action))admin(actor);
@@ -74,6 +76,7 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
   if(p.duplicate_confirmed!=null&&typeof p.duplicate_confirmed!=='boolean')throw new HttpError(400,'重複通知確認格式錯誤');
   const fingerprint=await sha256(JSON.stringify({ids,content,kind,...(pickupName?{pickup_name:pickupName}:{}),...(reply?{reply}:{}),...(p.duplicate_confirmed?{duplicate_confirmed:true}:{})}));
   const existing=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();
+  if(existing?.archived_at)throw new HttpError(409,'此發送請求的舊紀錄已清理，不能再次發送','RECORDS_CLEANED');
   if(existing&&(existing.fingerprint!==fingerprint||existing.actor_id!==actor.id))throw new HttpError(409,'重複請求內容不一致');
   await limit(env,'send:'+actor.id,30,60);
   const items=ids.map(tid=>({id:crypto.randomUUID(),teacher_id:tid,retry_key:crypto.randomUUID()}));
@@ -83,9 +86,9 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
    SELECT json_extract(j.value,'$.id'),?,json_extract(j.value,'$.teacher_id'),?,?,?,coalesce(t.binding_version,-1),json_extract(j.value,'$.retry_key'),?,?,?
    FROM json_each(?) j LEFT JOIN teachers t ON t.id=json_extract(j.value,'$.teacher_id')
    WHERE NOT EXISTS(SELECT 1 FROM notifications WHERE request_id=? AND teacher_id=json_extract(j.value,'$.teacher_id'))
-   AND EXISTS(SELECT 1 FROM send_requests WHERE id=? AND actor_id=? AND fingerprint=?)`).bind(request,kind,content,actor.id,pickup?'待領取':'待回覆',now,pickupName,JSON.stringify(items),request,request,actor.id,fingerprint)];
+   AND EXISTS(SELECT 1 FROM send_requests WHERE id=? AND actor_id=? AND fingerprint=? AND archived_at IS NULL)`).bind(request,kind,content,actor.id,pickup?'待領取':'待回覆',now,pickupName,JSON.stringify(items),request,request,actor.id,fingerprint)];
   await db.batch(statements);
-  const req=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();if(!req)throw new HttpError(409,'教師已有待領取紀錄，請確認是否為新件或仍需再次通知','DUPLICATE_NOTICE');if(req.fingerprint!==fingerprint||req.actor_id!==actor.id)throw new HttpError(409,'重複請求內容不一致');
+  const req=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();if(!req)throw new HttpError(409,'教師已有待領取紀錄，請確認是否為新件或仍需再次通知','DUPLICATE_NOTICE');if(req.archived_at)throw new HttpError(409,'此發送請求的舊紀錄已清理，不能再次發送','RECORDS_CLEANED');if(req.fingerprint!==fingerprint||req.actor_id!==actor.id)throw new HttpError(409,'重複請求內容不一致');
   const notices=await rows<{id:string}>(db.prepare('SELECT id FROM notifications WHERE request_id=? ORDER BY teacher_id').bind(request));
   for(const n of notices.slice(0,5))await dispatch(env,actor,n.id,reply);
   const results=await rows(db.prepare('SELECT id,send_status,error_code FROM notifications WHERE request_id=? ORDER BY teacher_id').bind(request));

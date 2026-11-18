@@ -21,6 +21,8 @@ test.beforeAll(async()=>{
  let ready=false;for(let i=0;i<100;i++){if(vite.exitCode!==null)throw Error('正式模式 Vite 提前停止；請確認 5174 埠沒有被其他程序占用');try{if((await fetch(origin)).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}if(!ready)throw Error('正式模式測試前端未啟動');
 });
 test.afterAll(async()=>{vite?.kill();await mf?.dispose();});
+// 各情境使用獨立瀏覽器但共用測試 D1；只隔離測試登入計數，不更動正式限流規則。
+test.beforeEach(async()=>{const db=await mf.getD1Database('DB');await db.prepare("DELETE FROM rate_limits WHERE key GLOB 'login-*'").run();});
 test('Cloudflare 模式：實際 Cookie 登入、綁定、推播 Mock、簽章 Webhook、輪詢顯示與登出',async({page})=>{
  test.setTimeout(90000);
  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
@@ -85,4 +87,14 @@ test('正式模式三秒輕量檢查、不重讀未變更對話，背景暫停�
  const raw=JSON.stringify({events:[{webhookEventId:randomUUID(),timestamp:Date.now(),type:'message',source:{type:'user',userId:uid},message:{type:'text',id:randomUUID(),text:'三秒同步新訊息'}}]});expect((await mf.dispatchFetch('http://localhost/api/line/webhook',{method:'POST',headers:{'x-line-signature':createHmac('sha256',lineSecret).update(raw).digest('base64')},body:raw})).status).toBe(200);await expect(page.locator('.messages')).toContainText('三秒同步新訊息',{timeout:10000});
  await page.getByRole('button',{name:/^待領取物品/}).click();await expect(page.locator('.chat-pickups')).toContainText('測試教材');await page.getByRole('button',{name:'關閉輔助面板'}).click();
  await page.clock.install();await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});const hiddenChecks=counts.changes;await page.clock.runFor(30000);expect(counts.changes).toBe(hiddenChecks);
+});
+
+test('正式模式管理員預覽並清理 D1 舊操作紀錄，更新畫面且保留清理稽核',async({page},info)=>{
+ const db=await mf.getD1Database('DB'),logId='cleanup-browser-'+randomUUID(),old='2024-01-01T00:00:00.000Z',callsBefore=lineCalls.length;
+ await db.prepare("INSERT INTO audit_logs(id,actor_id,action,created_at) VALUES(?,'browser-admin','login',?)").bind(logId,old).run();
+ await page.route(origin+'/api/**',async route=>{const req=route.request(),url=new URL(req.url());const response=await mf.dispatchFetch('http://localhost'+url.pathname+url.search,{method:req.method(),headers:await req.allHeaders(),...(req.method()==='POST'?{body:req.postData()!}:{})});await route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()});});
+ await page.goto(origin);await page.getByLabel('登入帳號',{exact:true}).fill(username);await page.getByLabel('密碼',{exact:true}).fill(password);await page.getByRole('button',{name:'登入辦公室'}).click();await page.getByRole('button',{name:'系統管理',exact:true}).click();const panel=page.locator('.record-cleanup');
+ await panel.getByLabel('清理日期').fill('2024-01-02');await panel.getByLabel('已完成通知與聊天',{exact:true}).uncheck();await panel.getByLabel('已完成交接',{exact:true}).uncheck();await panel.getByLabel('舊操作紀錄',{exact:true}).check();await panel.getByRole('button',{name:'預覽可清理紀錄'}).click();await expect(panel.locator('.cleanup-preview .cleanup-counts b')).toHaveText(['0 筆','0 則','0 筆','1 筆']);await panel.screenshot({path:info.outputPath('cloudflare-cleanup.png'),animations:'disabled'});
+ await panel.getByLabel('刪除確認文字').fill('刪除紀錄');await panel.getByRole('button',{name:'確認永久刪除'}).click();await expect(panel.getByRole('status')).toContainText('清理完成');expect(await db.prepare('SELECT id FROM audit_logs WHERE id=?').bind(logId).first()).toBeNull();
+ const audit:any=await db.prepare("SELECT * FROM audit_logs WHERE action='records_cleanup' ORDER BY created_at DESC LIMIT 1").first();expect(audit.actor_id).toBe('browser-admin');expect(JSON.parse(audit.details).counts.audits).toBe(1);await expect(page.locator('.operation-history')).toContainText('清理舊紀錄');expect(lineCalls.length).toBe(callsBefore);await expect(panel.locator('.cleanup-demo-tools')).toHaveCount(0);
 });

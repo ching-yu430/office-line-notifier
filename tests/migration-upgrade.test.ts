@@ -1,6 +1,18 @@
 import {it,expect} from 'vitest';
 import {Miniflare} from 'miniflare';
 import {readFileSync} from 'node:fs';
+it('0004 升級保留訊息與綁定，新增清理帳本及已清理發送請求標記',async()=>{
+ const mf=new Miniflare({modules:true,script:"export default {fetch(){return new Response('測試')}}",compatibilityDate:'2026-07-01',d1Databases:['DB']});
+ try{
+  const db=await mf.getD1Database('DB'),apply=async(name:string)=>{const sql=readFileSync('migrations/'+name,'utf8').replace(/--[^\n]*/g,'');await db.batch(sql.split(/;\s*(?=(?:CREATE|INSERT|ALTER|PRAGMA|$))/g).map(s=>s.trim()).filter(Boolean).map(sql=>db.prepare(sql)));};
+  for(const name of ['0001_initial.sql','0002_workflow.sql','0003_pickup_items.sql'])await apply(name);
+  const now=new Date().toISOString();await db.prepare("INSERT INTO admins VALUES('cleanup-admin','cleanup-admin','虛構升級管理員','僅供遷移測試','admin',1,?,?)").bind(now,now).run();
+  await db.prepare("INSERT INTO teachers(id,name,line_user_id,bound_at,created_at,updated_at) VALUES('cleanup-teacher','虛構教師','U-mock-cleanup',?,?,?)").bind(now,now,now).run();
+  await db.prepare("INSERT INTO messages(id,teacher_id,direction,content,created_at) VALUES('old-msg','cleanup-teacher','in','保留的舊訊息',?)").bind(now).run();
+  await db.prepare("INSERT INTO send_requests(id,actor_id,fingerprint,created_at) VALUES('old-request','cleanup-admin','測試指紋',?)").bind(now).run();await apply('0004_record_cleanup.sql');
+  expect((await db.prepare('SELECT content FROM messages').first())?.content).toBe('保留的舊訊息');expect((await db.prepare('SELECT line_user_id FROM teachers').first())?.line_user_id).toBe('U-mock-cleanup');expect((await db.prepare('SELECT archived_at FROM send_requests').first())?.archived_at).toBeNull();expect((await db.prepare('SELECT count(*) AS n FROM record_cleanup_jobs').first())?.n).toBe(0);
+ }finally{await mf.dispose();}
+});
 it('0002 可套用於已有帳號、綁定及訊息的舊資料庫，原資料保留',async()=>{
  const mf=new Miniflare({modules:true,script:"export default {fetch(){return new Response('測試')}}",compatibilityDate:'2026-07-01',d1Databases:['DB']});
  try{

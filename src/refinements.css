@@ -46,6 +46,19 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #d4
 @media(max-width:1000px){.conversation-tools{position:absolute;right:0;top:0;bottom:0;width:min(320px,90%);z-index:4;box-shadow:-8px 0 24px #71572018}.conversation-header-tools button>span:not(.count){display:inline}}
 @media(max-width:700px){.chat-layout{grid-template-columns:minmax(0,1fr);height:auto;min-height:0;overflow:hidden}.chat-layout.has-conversation .conversation{height:calc(100dvh - 24px);min-height:460px}.conversation .chat-heading{padding:13px 12px;gap:7px}.chat-heading>div:first-of-type>b{font-size:15px}.conversation-header-tools{gap:0}.conversation-header-tools button{padding:7px}.conversation-header-tools button>span:not(.count){display:none}.chat-heading select{padding:7px 6px;font-size:12px;max-width:83px}.conversation .messages{padding:20px 15px}.message>div{font-size:14px;line-height:1.85}.composer-tools{padding:10px 13px 0;gap:6px}.composer-tools .attachment-hint{font-size:12px}.conversation .reply-input{padding:10px 13px 14px}.reply-draft textarea{font-size:15px;min-height:72px}.conversation-tools{width:calc(100% - 22px)}.conversation-tools .chat-pickups>div{padding-left:17px;padding-right:17px}.chat-demo-tools>summary{padding:7px 13px}.page-heading{margin-top:21px;margin-bottom:18px}.typing-presence{padding:7px 13px}}
 
+/* 交接操作同列排列，保留大字內容並減少每筆留白。 */
+.handover-row{padding:15px 23px;gap:18px}
+.handover-row small{margin-top:5px}
+.handover-row>.handover-actions{flex:0 0 auto;width:auto;max-width:none;flex-wrap:nowrap;justify-content:flex-end;gap:8px}
+.handover-actions .outline{padding:9px 12px;font-size:12px;gap:5px;min-height:36px}
+.handover-actions .text-button{padding:9px 7px;min-height:36px}
+.settings-handover-history .handover-row{flex-direction:column;align-items:stretch;gap:8px;padding:14px 18px}
+.settings-handover-history .handover-actions{align-self:flex-end}
+@media(max-width:700px){
+ .handover-row{flex-direction:column;align-items:stretch;gap:8px;padding:14px 16px}
+ .handover-row>.handover-actions{align-self:flex-end;max-width:100%}
+}
+
 /* 2026.11.18.2：標題列操作成組、交接搜尋並列與可見的對話狀態切換。 */
 .panel-head-actions{display:flex;align-items:center;gap:14px;margin-left:auto;flex-shrink:0}.panel-head-actions .text-button{white-space:nowrap;gap:5px}.handover-panel .handover-heading{gap:16px;align-items:center}.handover-heading>h2{flex-shrink:0}.handover-heading .handover-search{margin:0;flex:1;min-width:100px;max-width:360px}.handover-heading>.primary{margin-left:auto;flex-shrink:0}.conversation-status-controls{display:inline-flex;align-items:stretch;gap:3px;padding:3px;background:#faf6e9;border:1px solid #e6dbc1;border-radius:9px;flex-shrink:0}.conversation-status-controls button{display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;font-size:13px;color:#7e7055;padding:8px 10px;border-radius:6px;min-height:33px}.conversation-status-controls button[aria-pressed=true]{color:#695120;background:#f0e2b1;font-weight:600;box-shadow:0 1px 2px #8065260c}.batch-item-kind{display:flex;align-items:center;gap:7px}.batch-item-kind svg{flex-shrink:0;color:#94743a}
 @media(max-width:1100px){.conversation .chat-heading{flex-wrap:wrap}.conversation-status-controls{margin-left:auto}.conversation-status-controls button{padding:7px 8px;font-size:12px}.panel-head-actions{gap:10px}}

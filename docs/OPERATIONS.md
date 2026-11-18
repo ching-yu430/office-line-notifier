@@ -1,5 +1,13 @@
 # 維護、額度、備份與還原
 
+## 系統管理與紀錄 ZIP 備份
+
+系統管理的上方狀態與帳號維持並排，其餘範本、紀錄、備份及清理可按標題展開。紀錄列表仍有日期篩選、每頁五筆及固定高度捲動。
+
+管理員可展開「紀錄備份」按「下載 ZIP 備份」，匯出完整行政歷史的 JSON／CSV 與檢查碼。ZIP 不含登入密碼、Session、LINE 憑證或 LINE User ID，不能替代下面的完整 D1 SQL 備份及後端 Secrets。完整規則見 [網頁紀錄備份](RECORD-BACKUP.md)。
+
+自動備份需選擇電腦資料夾、授權寫入並設定每 1／7／30 天，預設關閉。只在管理員仍登入且網頁開啟時執行；背景分頁返回後補做，關閉、休眠、重新整理或登出後不會自行繼續。重新開啟需再次選擇資料夾，ZIP 不會上傳雲端或存回 D1。
+
 ## 手動清理舊紀錄
 
 管理員可從系統管理底部的「紀錄清理」選擇日期及範圍，先預覽筆數，備份後再輸入「刪除紀錄」確認。此操作不會自動排程，保留待辦、每位教師最後訊息、教師身分與清理摘要；不可用快速復原還原。0004 Migration 只升級結構，不刪歷史。完整條件、分批上限及 Windows 指令見 [紀錄清理說明](RECORD-CLEANUP.md)；累積更新以 [整合更新說明](CONVERSATION-UPDATE.md) 為準。
@@ -54,7 +62,7 @@ npx wrangler d1 execute office-line-notifier --remote --command "SELECT outcome,
 
 以 [Cloudflare Workers 限制](https://developers.cloudflare.com/workers/platform/limits/)、[D1 用量](https://developers.cloudflare.com/d1/platform/pricing/) 及 [LINE 費用／額度](https://developers.line.biz/en/docs/messaging-api/pricing/) 當期公告為準。免費方案不是無限請求、無限資料庫、無限訊息。
 
-輪詢每個可見分頁每 15 秒一次，一天持續開啟約 5,760 次 API 請求，8 小時約 1,920 次；多人／多分頁會累加。ETag 可減少下載與完整查詢，不會讓請求數歸零。D1 有讀寫列數及總容量限制，通知／稽核觸發器也會增加寫入列數。靜態資源由 Pages 提供，API 才消耗 Workers 執行。
+目前操作訊息中心約每 3 秒做輕量版本檢查，其他頁約 10 秒，閒置兩分鐘改 30 秒，背景暫停。單一持續操作聊天分頁八小時約 9,600 次檢查，五個約 48,000 次，另加一般操作與 Webhook；多人／多分頁會累加。無變更不查完整對話，但請求數不會歸零。D1 有讀寫列數及總容量限制，通知／稽核觸發器也增加寫入列數。ZIP 備份另有分頁讀取，不呼叫 LINE；大量備份及清理須查看實際 Metrics。靜態資源由 Pages 提供，API 才消耗 Workers 執行。
 
 每次發送最多處理 5 人，主動發送每帳號每分鐘 30 個建立請求，全域每分鐘最多 60 筆 dispatch 嘗試。LINE 若回 429 不自動重送。綁定猜測每 LINE 身分每小時 10 次，全域 1,000 次；大量無效綁定可能造成暫時無法綁定，需維護者檢查。
 

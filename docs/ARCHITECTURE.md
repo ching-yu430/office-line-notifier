@@ -102,6 +102,14 @@ Workers 先驗證原始位元組對應的 LINE HMAC-SHA256，再解析大小受�
 
 `0004_record_cleanup.sql` 新增 `record_cleanup_jobs`、`audit_logs.details`、`send_requests.archived_at` 及清理查詢索引。管理員預覽只保存十分鐘內的目標識別與數量，執行時在同一 D1 batch 重新驗證、封存發送請求、刪除關聯正文並留下稽核摘要；完成後清除目標清單。Webhook 識別及請求防重複帳本保留，已清理通知的原請求不能重新發送。每位教師保留最後訊息，確保 SQLite 序號與未查看狀態不倒退。流程、分批上限及測試見 [紀錄清理](RECORD-CLEANUP.md)。
 
+## 紀錄備份與 2026.11.18.5 修整
+
+`0005_record_exports.sql` 新增獨立 `backup_version` 與紀錄資料表的變更觸發器，排除查看／輸入提示。管理員透過 `records_backup_start` 取得 HMAC 簽署、限時且限本人使用的版本與筆數，再透過 `records_backup_page` 分頁讀取固定白名單欄位；版本不符拒絕。前端核對全數筆數、產生 JSON／安全 CSV、SHA-256 清單及 ZIP，最後 `records_backup_finish` 再驗證版本並留下產生摘要，不在 D1 儲存副本。
+
+自動備份由瀏覽器執行，不是 Workers Cron。設定僅於此電腦／此帳號儲存，資料夾 handle 只在本次登入記憶體；需原生資料夾權限與 Web Locks，前景且仍登入才排程，身分世代變動即取消。沒有加入 R2、付費服務或額外 Secrets。手動紀錄 ZIP 不包含密碼雜湊與 LINE User ID，完整災難還原另用 D1 SQL 備份。
+
+成功登入清除帳號失敗桶，帳號限流 HMAC 不再使用綁定碼正規化。舊工作階段 401 不會清除新登入；聊天以時間及序號排序；清理再比對教師對話版本；管理輸入與回應欄位採更明確驗證。檢查範圍及剩餘開發工具公告見 [安全報告](SECURITY-REVIEW-2026-11-18.md)。
+
 畫面僅映射狀態標籤：對話已完成顯示已回覆；信件／包裹已完成顯示已領取；其他通知顯示已處理。資料庫原 enum 與既有 API 值相容。
 
 

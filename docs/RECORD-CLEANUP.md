@@ -1,6 +1,6 @@
-# 紀錄清理：2026.11.18.4
+# 紀錄清理（沿用於 2026.11.18.5）
 
-管理員在「系統管理」底部操作，用來減少長年累積的文字與紀錄。維持既有暖黃色版面，沒有新增附件、儲存服務、排程刪除或付費套件。本次只建立程式與測試，沒有清理正式資料庫。
+管理員在「系統管理」底部展開「紀錄清理」後操作，用來減少長年累積的文字與紀錄。維持既有暖黃色版面，沒有新增附件、儲存服務、排程刪除或付費套件。本次只建立程式與測試，沒有清理正式資料庫。
 
 ## 操作方式
 
@@ -43,7 +43,7 @@
 
 ## 確認更新正式網站後才執行
 
-先依 [整合更新說明](CONVERSATION-UPDATE.md) 合併六個資料夾與兩個套件檔案，保留原 `wrangler.jsonc`、環境檔及 Secrets。在原完整專案根目錄執行：
+先依 [整合更新說明](CONVERSATION-UPDATE.md) 合併六個資料夾與三個根目錄檔案，保留原 `wrangler.jsonc`、環境檔及 Secrets。在原完整專案根目錄執行：
 
 ```powershell
 fnm env --shell powershell | Out-String | Invoke-Expression
@@ -51,15 +51,15 @@ fnm use 24
 npm.cmd ci
 npx.cmd wrangler d1 migrations list office-line-notifier --remote
 New-Item -ItemType Directory -Force .local | Out-Null
-$officeBackupPath = Join-Path ".local" ("before-0004-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".sql")
+$officeBackupPath = Join-Path ".local" ("before-0005-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".sql")
 npx.cmd wrangler d1 export office-line-notifier --remote --output $officeBackupPath
 npx.cmd wrangler d1 migrations apply office-line-notifier --remote
 npx.cmd wrangler d1 migrations list office-line-notifier --remote
 ```
 
-若尚未套用 0003，遷移工具會先套用 0003 再套用 **0004_record_cleanup.sql**；已執行的遷移不會重跑。0004 只新增清理帳本、稽核摘要欄位、索引及發送請求封存欄位，不會自動刪除任何歷史資料。
+目前整合版會依序套用尚未執行的 0003、**0004_record_cleanup.sql**、0005；已執行的遷移不會重跑。0004 只新增清理帳本、稽核摘要欄位、索引及發送請求封存欄位，不會自動刪除任何歷史資料。
 
-確認備份成功、沒有待套用遷移後，才由網站擁有者確認上傳 GitHub main 觸發正式部署。正式版介面／後端版本應同為 `2026.11.18.4`。不要先部署新程式卻漏套用 0004。
+確認備份成功、沒有待套用遷移後，才由網站擁有者確認上傳 GitHub main 觸發正式部署。正式版介面／後端版本應同為 `2026.11.18.5`。目前整合版另需套用 0005（備份版本）；不要先部署新程式卻漏套用所需遷移。
 
 每次真正清理前，可同樣執行備份指令，將檔名前綴改成 `before-record-cleanup-`。備份含敏感資料，只留在學校核准的位置，不要上傳 GitHub 或放進公開更新包。還原應先在另一個資料庫演練，依 [維運文件](OPERATIONS.md) 核對 Migration、帳號及綁定，再安排切換。
 

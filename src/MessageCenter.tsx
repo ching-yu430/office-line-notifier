@@ -20,7 +20,7 @@ export function MessageCenter({requests,data,actorId,role,teacherId,onSelect,bus
  const teacher=data.teachers.find(t=>t.id===teacherId),canSend=!!teacher?.active&&!!teacher?.bound_at;
  const inbox=inboxFor(data,teacherId);
  const currentMessages=data.messages.filter(m=>m.teacher_id===teacherId),loaded=history?.teacherId===teacherId?history:null;
- const messages=[...new Map([...(loaded?.messages||[]),...currentMessages].map(m=>[m.id,m])).values()].sort((a,b)=>a.created_at.localeCompare(b.created_at));
+ const messages=[...new Map([...(loaded?.messages||[]),...currentMessages].map(m=>[m.id,m])).values()].sort((a,b)=>a.created_at.localeCompare(b.created_at)||(a.sequence??0)-(b.sequence??0));
  const pickups=loaded?.pickups||data.notifications.filter(n=>n.teacher_id===teacherId&&n.status==='待領取'&&isPickup(n));
  const lastVisibleInbound=messages.some(m=>m.id===inbox.latest_inbound_id)?inbox.latest_inbound_id:null;
  const lastId=inbox.latest_inbound_id??null;

@@ -1,8 +1,12 @@
-# 紀錄清理與累積功能整合更新：2026.11.18.4
+# 系統管理、紀錄備份與安全修整：2026.11.18.5
 
-此更新包已包含先前尚未上傳的 `2026.11.17.3`、`2026.11.18.1`、`2026.11.18.2`、`2026.11.18.3`，**之後只需使用這一包**。維持原始透明 Logo、暖黃色設計、六張卡片與系統管理配置。本次沒有更新正式網站、變更遠端資料庫或發送真實 LINE。
+此更新包已包含先前尚未上傳的 `2026.11.17.3`、`2026.11.18.1`、`2026.11.18.2`、`2026.11.18.3`、`2026.11.18.4`，**之後只需使用這一包**。維持原始透明 Logo、暖黃色設計、六張卡片與系統管理配置。本次沒有更新正式網站、變更遠端資料庫或發送真實 LINE。
 
 ## 操作變更
+
+- 系統管理上方狀態及帳號維持並排，範本、最近紀錄、備份及清理預設收合，展開後使用固定範圍捲動，減少整頁高度。收合狀態保留於本次登入。
+- 新增管理員 ZIP 紀錄備份，包含完整 JSON、CSV、筆數與檢查碼，不受畫面最近 500 筆限制。支援此電腦每 1／7／30 天自動備份，需網頁開啟、管理員登入及資料夾授權；關閉網頁後不執行。完整說明見 [紀錄備份](RECORD-BACKUP.md)。
+- 修正登入限流誤判、舊 401 誤登出、同時訊息順序、清理舊快照與輸入格式等問題。依賴檢查仍有一項尚待上游修補的開發工具公告，範圍與處理見 [安全檢查報告](SECURITY-REVIEW-2026-11-18.md)。
 
 - 系統管理底部新增「紀錄清理」：只有管理員可預覽及刪除指定日期以前的已完成通知／聊天、已完成交接與舊操作紀錄。先看筆數，再輸入「刪除紀錄」確認；保留待辦、每位教師最後一則訊息、教師綁定與清理摘要。此功能不會自動刪除資料，完整規則與分批上限見 [紀錄清理說明](RECORD-CLEANUP.md)。
 - 交接事項的「標記完成／更正／修改紀錄」改為電腦版右側同一排，減少每筆上下留白；內容維持電腦 18px、手機 17px。手機及系統管理窄欄的操作放在內容下方靠右同列，保留按鈕文字、完成人填寫、更正與歷程功能。
@@ -40,11 +44,11 @@
 現在暫時無法上傳，不需要立即執行以下步驟。等你確認畫面、準備更新正式網站時再操作。
 
 1. 將整合包解壓後的 `src`、`worker`、`tests`、`docs`、`migrations`、`scripts` **六個資料夾**合併到原本完整專案；覆寫同名檔案、其餘保留，勿刪除既有 0001／0002 Migration。
-2. 一併覆寫根目錄的 **`package.json`、`package-lock.json`**；上一批的 QR 套件仍需要這兩個檔案。
+2. 一併覆寫根目錄的 **`package.json`、`package-lock.json`、`vite.config.ts`**；QR 與 ZIP 套件需要前兩個檔案；`vite.config.ts` 另將開發伺服器預設限於本機。
 3. 原本的 `wrangler.jsonc`、D1 ID、正式網址、`.dev.vars`、Secrets、教師資料與登入帳密保持原樣。此包不含環境設定或真實資料。
-4. 先備份 D1，再依序套用尚未執行的 **`0003_pickup_items.sql`**、**`0004_record_cleanup.sql`**。0003 加入自填物品與對話版本；0004 加入清理帳本、稽核摘要欄位及防止已清理通知再次發送的標記。兩者只升級結構，不會自動刪除歷史，也不需重建資料庫。
-5. Migration 成功後，確認要更新正式網站，再到 `npust-lc/office-line-notifier` 的 GitHub 根目錄 **Add file → Upload files**，拖入上述六個資料夾及兩個檔案。不要上傳 ZIP 本身，不要多包一層外部資料夾。
-6. **提交 `main` 會觸發既有 Cloudflare Pages 正式部署。** 成功後開固定網址 `https://office-line-notifier.pages.dev/`，按 `Ctrl + Shift + R`；系統管理的介面／後端版本應同為 `2026.11.18.4`。
+4. 先備份 D1，再依序套用尚未執行的 **`0003_pickup_items.sql`**、**`0004_record_cleanup.sql`**、**`0005_record_exports.sql`**。0003 加入自填物品與對話版本；0004 加入清理帳本、稽核摘要欄位及防止已清理通知再次發送的標記。0005 加入備份版本。三者只升級結構，不會自動刪除歷史，也不需重建資料庫。
+5. Migration 成功後，確認要更新正式網站，再到 `npust-lc/office-line-notifier` 的 GitHub 根目錄 **Add file → Upload files**，拖入上述六個資料夾及三個檔案。不要上傳 ZIP 本身，不要多包一層外部資料夾。
+6. **提交 `main` 會觸發既有 Cloudflare Pages 正式部署。** 成功後開固定網址 `https://office-line-notifier.pages.dev/`，按 `Ctrl + Shift + R`；系統管理的介面／後端版本應同為 `2026.11.18.5`。
 
 本整合包以目前既有專案為基礎，不能單獨從空資料夾啟動。前一版 `BINDING-DESK-UPDATE.md` 中「不需 Migration」只適用 2026.11.17.3，本版應以本文件為準。
 
@@ -79,17 +83,17 @@ npm.cmd ci
 npx.cmd wrangler d1 migrations list office-line-notifier --remote
 ```
 
-若目前只套用 0001／0002，預期清單會有 0003 及 0004；若已完成 0003，這次只會列 0004。請以實際清單為準，不要重複手動執行已套用的 SQL。備份只保留在自己的電腦，不要上傳 GitHub：
+若目前只套用 0001／0002，預期清單會有 0003、0004、0005；若已完成 0004，這次只會列 0005。請以實際清單為準，不要重複手動執行已套用的 SQL。備份只保留在自己的電腦，不要上傳 GitHub：
 
 ```powershell
 New-Item -ItemType Directory -Force .local | Out-Null
-$officeBackupPath = Join-Path ".local" ("before-0004-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".sql")
+$officeBackupPath = Join-Path ".local" ("before-0005-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".sql")
 npx.cmd wrangler d1 export office-line-notifier --remote --output $officeBackupPath
 npx.cmd wrangler d1 migrations apply office-line-notifier --remote
 npx.cmd wrangler d1 migrations list office-line-notifier --remote
 ```
 
-確認沒有待套用遷移，再上傳 GitHub 觸發部署。升級先新增相容舊版的欄位與資料表，舊版程式仍可繼續運作。不要先部署新程式卻漏套用 0003 或 0004，否則介面會提示資料庫版本不符。
+確認沒有待套用遷移，再上傳 GitHub 觸發部署。升級先新增相容舊版的欄位與資料表，舊版程式仍可繼續運作。不要先部署新程式卻漏套用 0003、0004 或 0005，否則介面會提示資料庫版本不符。
 
 ## 測試與驗收
 

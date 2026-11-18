@@ -1,7 +1,7 @@
 import {type Actor,type Env,HttpError,admin,id,iso,unix,rows} from './types';
 import {limit} from './auth';
 import {cleanupOptions,cleanupCutoff,cleanupLimits,cleanupTotal,type CleanupCounts,type CleanupPreview} from '../src/cleanup';
-type Target={id:string;version?:number};
+type Target={id:string;version?:number;teacher_version?:number};
 type Plan={messages:Target[];notifications:Target[];handovers:Target[];audits:Target[]};
 // 每位教師保留最後一則訊息，同時避免 SQLite rowid 重用破壞未查看序號。
 const messageWhere=`m.created_at<? AND EXISTS(SELECT 1 FROM conversations c WHERE c.teacher_id=m.teacher_id AND c.status='已完成')
@@ -21,7 +21,7 @@ export async function recordCleanup(env:Env,actor:Actor,action:string,p:any){
   await limit(env,'cleanup-preview:'+actor.id,12,60);
   const cutoff=cleanupCutoff(options.before),plan:Plan={messages:[],notifications:[],handovers:[],audits:[]};
   if(options.contact){
-   plan.messages=await rows(db.prepare(`SELECT m.id FROM messages m WHERE ${messageWhere} ORDER BY m.rowid LIMIT ?`).bind(cutoff,time,cleanupLimits.messages));
+   plan.messages=await rows(db.prepare(`SELECT m.id,(SELECT conversation_version FROM teachers WHERE id=m.teacher_id) AS teacher_version FROM messages m WHERE ${messageWhere} ORDER BY m.rowid LIMIT ?`).bind(cutoff,time,cleanupLimits.messages));
    plan.notifications=await rows(db.prepare(`SELECT n.id,n.version FROM notifications n WHERE ${noticeWhere} ORDER BY n.completed_at,n.id LIMIT ?`).bind(cutoff,cutoff,time,JSON.stringify(plan.messages),cleanupLimits.notifications));
   }
   if(options.handovers)plan.handovers=await rows(db.prepare(`SELECT h.id,h.version FROM handovers h WHERE ${handoverWhere} ORDER BY h.completed_at,h.id LIMIT ?`).bind(cutoff,cutoff,time,cleanupLimits.handovers));
@@ -45,7 +45,7 @@ export async function recordCleanup(env:Env,actor:Actor,action:string,p:any){
  const statements=[
   // 所有目標都仍可刪除才取得本次執行權；同一 D1 batch 內驗證、刪除及稽核一併提交。
   db.prepare(`UPDATE record_cleanup_jobs SET state='running',operation_token=? WHERE id=? AND actor_id=? AND state='preview' AND expires_at>?
-   AND (SELECT count(*) FROM messages m WHERE ${member('m','?')} AND ${messageWhere})=?
+   AND (SELECT count(*) FROM messages m JOIN json_each(?) j ON m.id=json_extract(j.value,'$.id') AND (SELECT conversation_version FROM teachers WHERE id=m.teacher_id)=json_extract(j.value,'$.teacher_version') WHERE ${messageWhere})=?
    AND (SELECT count(*) FROM notifications n JOIN json_each(?) j ON n.id=json_extract(j.value,'$.id') AND n.version=json_extract(j.value,'$.version') WHERE ${noticeWhere})=?
    AND (SELECT count(*) FROM handovers h JOIN json_each(?) j ON h.id=json_extract(j.value,'$.id') AND h.version=json_extract(j.value,'$.version') WHERE ${handoverWhere})=?
    AND (SELECT count(*) FROM audit_logs a WHERE ${member('a','?')} AND a.created_at<? AND a.action!='records_cleanup')=?`)

@@ -8,14 +8,17 @@ import {resolveBindingLink} from './binding-link';
 import {pickupCommand} from './pickups';
 import{APP_VERSION}from'../src/version';
 import {recordCleanup} from './record-cleanup';
+import {recordBackup} from './record-backup';
 export async function command(env:Env,actor:Actor,action:string,p:any){
  const db=env.DB,now=iso();
+ const backup=await recordBackup(env,actor,action,p);if(backup!==undefined)return backup;
  const cleanup=await recordCleanup(env,actor,action,p);if(cleanup!==undefined)return cleanup;
  const pickup=await pickupCommand(env,actor,action,p);if(pickup!==undefined)return pickup;
  const result=await workflowCommand(env,actor,action,p);if(result!==undefined)return result;
  if(['teacher_save','issue_code','unbind','staff_save','template_save','system_status'].includes(action))admin(actor);
  if(action==='system_status')return {version:APP_VERSION,public_origin:env.ALLOWED_ORIGIN,send_enabled:env.LINE_SEND_ENABLED==='true',line_configured:!!env.LINE_CHANNEL_ACCESS_TOKEN&&!!env.LINE_CHANNEL_SECRET,binding_configured:env.BINDING_PEPPER?.length>=32};
  if(action==='teacher_save'){
+  if(p.active!=null&&typeof p.active!=='boolean')throw new HttpError(400,'啟用狀態格式錯誤');
   const tid=p.teacher_id?id(p.teacher_id):crypto.randomUUID();const name=text(p.name,'教師姓名',80),dept=text(p.department??'','單位',500,0),notes=text(p.notes??'','備註',500,0);
   const statements=[db.prepare(`INSERT INTO teachers(id,name,department,notes,active,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,department=excluded.department,notes=excluded.notes,active=excluded.active,updated_at=excluded.updated_at`).bind(tid,name,dept,notes,p.active===false?0:1,now,now),audit(db,actor.id,action,tid)];
   // 停用時撤銷未使用綁定碼，避免重新啟用後舊碼意外復活。
@@ -32,6 +35,7 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
   const tid=id(p.teacher_id);await db.batch([db.prepare('UPDATE teachers SET line_user_id=NULL,bound_at=NULL,bound_event_id=NULL,binding_event_time=NULL,binding_version=binding_version+1,updated_at=? WHERE id=?').bind(now,tid),db.prepare('DELETE FROM binding_codes WHERE teacher_id=?').bind(tid),db.prepare("UPDATE notifications SET send_status='failed',error_code='binding_changed' WHERE teacher_id=? AND send_status='queued'").bind(tid),audit(db,actor.id,action,tid)]);return {};
  }
  if(action==='staff_save'){
+  if(p.active!=null&&typeof p.active!=='boolean')throw new HttpError(400,'啟用狀態格式錯誤');
   const sid=p.id?id(p.id):crypto.randomUUID(),role=p.role;if(!['admin','staff'].includes(role))throw new HttpError(400,'權限格式錯誤');
   const name=text(p.display_name,'顯示名稱',80),old=await db.prepare('SELECT * FROM admins WHERE id=?').bind(sid).first<any>();
   if(actor.id===sid&&(p.active===false||role!=='admin'))throw new HttpError(409,'不可停用或降級自己的帳號');
@@ -54,7 +58,7 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
  if(action.startsWith('handover_'))return handover(env,actor,action,p);
  if(action==='conversation_status'){
   if(!['待回覆','已完成'].includes(p.status))throw new HttpError(400,'對話狀態錯誤');
-  const tid=id(p.teacher_id);await db.batch([db.prepare('INSERT INTO conversations(teacher_id,status,updated_at) VALUES(?,?,?) ON CONFLICT(teacher_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at').bind(tid,p.status,now),audit(db,actor.id,action,tid)]);return {};
+  const tid=id(p.teacher_id);if(!await db.prepare('SELECT id FROM teachers WHERE id=?').bind(tid).first())throw new HttpError(404,'找不到教師');await db.batch([db.prepare('INSERT INTO conversations(teacher_id,status,updated_at) VALUES(?,?,?) ON CONFLICT(teacher_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at').bind(tid,p.status,now),audit(db,actor.id,action,tid)]);return {};
  }
  if(action==='send'){
   if(env.LINE_SEND_ENABLED!=='true'||!env.LINE_CHANNEL_ACCESS_TOKEN)throw new HttpError(409,'真實發送尚未啟用，請先完成測試與核准');

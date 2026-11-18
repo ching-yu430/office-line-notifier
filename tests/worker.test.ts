@@ -44,6 +44,57 @@ function ev(text:string,uid='U'+randomUUID(),eventId=randomUUID(),messageId=rand
 async function hook(events:any[],raw?:string,sig?:string){const body=raw??JSON.stringify({events});return mf.dispatchFetch('http://localhost/api/line/webhook',{method:'POST',headers:{'x-line-signature':sig??createHmac('sha256',lineSecret).update(body).digest('base64')},body});}
 async function get<T=any>(sql:string,...args:any[]){return db.prepare(sql).bind(...args).first<T>();}
 const cleanupInput={before:'2026-01-01',contact:true,handovers:true,audits:true};
+async function backupStart(){const r=await cmd('records_backup_start');expect(r.status).toBe(200);return await r.json() as any;}
+it('備份所有 API 需要登入、CSRF、正確來源及管理員，不能靠隱藏按鈕授權',async()=>{
+ for(const action of ['records_backup_start','records_backup_page','records_backup_finish']){
+  expect((await cmd(action,{},'','')).status).toBe(401);expect((await cmd(action,{},cookie,'wrong')).status).toBe(403);expect((await cmd(action,{},staffCookie,staffCsrf)).status).toBe(403);
+  expect((await request('/command',{action,payload:{}},cookie,csrf,{Origin:'https://untrusted.example'})).status).toBe(403);
+ }
+});
+it('備份讀取完整超過 500 筆歷史且只回傳白名單欄位，不匯出憑證或 LINE 身分',async()=>{
+ const tid=await teacher(true),lineId=(await get('SELECT line_user_id FROM teachers WHERE id=?',tid)).line_user_id;
+ await db.prepare(`WITH RECURSIVE seq(n) AS(SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<530) INSERT INTO messages(id,teacher_id,direction,content,created_at) SELECT 'backup-msg-'||n,?,'in','虛構完整歷史備份',? FROM seq`).bind(tid,now()).run();
+ const start=await backupStart();expect(start.counts.messages).toBe(530);const collected:any[]=[];let cursor=null;
+ do{const r=await cmd('records_backup_page',{token:start.token,table:'messages',cursor:cursor??''});expect(r.status).toBe(200);const page:any=await r.json();collected.push(...page.rows);cursor=page.next_cursor;}while(cursor);
+ expect(collected).toHaveLength(530);expect(new Set(collected.map(r=>r.id)).size).toBe(530);expect(collected[0].sequence).toBeTypeOf('number');
+ let text='';for(const table of ['staff','teachers','notifications']){const r=await cmd('records_backup_page',{token:start.token,table});expect(r.status).toBe(200);text+=JSON.stringify(await r.json());}
+ for(const sensitive of ['password_hash','csrf_token','line_user_id','code_hash','retry_key',credentials.password,authPepper,lineId])expect(text).not.toContain(sensitive);
+});
+it('備份識別防竄改與跨管理員使用，拒絕任意資料表、游標及過期識別',async()=>{
+ const start=await backupStart(),token=start.token as string,other='backup-admin-'+randomUUID();
+ expect((await cmd('records_backup_page',{token:token.slice(0,-1)+(token.endsWith('a')?'b':'a'),table:'teachers'})).status).toBe(403);
+ expect((await cmd('records_backup_page',{token,table:'sessions'})).status).toBe(400);expect((await cmd('records_backup_page',{token,table:'teachers',cursor:"' OR 1=1 --"})).status).toBe(400);
+ const hash=(await get('SELECT password_hash FROM admins WHERE id=?','test-admin')).password_hash;await db.prepare("INSERT INTO admins VALUES(?,?,?,?,'admin',1,?,?)").bind(other,other,'另一位虛構管理員',hash,now(),now()).run();const logged=await login(other);
+ expect((await cmd('records_backup_page',{token,table:'teachers'},logged.cookie,logged.csrf)).status).toBe(403);
+ const value=JSON.parse(atob(token.split('.')[0]));value.expires_at=0;const payload=btoa(JSON.stringify(value)),sig=createHmac('sha256',authPepper).update('office-record-backup-v1:'+payload).digest('hex');
+ expect((await cmd('records_backup_page',{token:payload+'.'+sig,table:'teachers'})).status).toBe(409);
+});
+it('備份版本排除查看與輸入提示，但正文更新時拒絕混合版本，完成只記一筆摘要',async()=>{
+ const tid=await teacher(true),mid=randomUUID();await db.prepare("INSERT INTO messages(id,teacher_id,direction,content,created_at) VALUES(?,?,'in','備份測試',?)").bind(mid,tid,now()).run();const start=await backupStart();
+ await cmd('conversation_view',{teacher_id:tid,message_id:mid});await cmd('presence',{teacher_id:tid,client_id:randomUUID(),typing:true});
+ expect((await cmd('records_backup_page',{token:start.token,table:'messages'})).status).toBe(200);
+ const body={token:start.token,sha256:randomBytes(32).toString('hex'),bytes:100};expect((await cmd('records_backup_finish',body)).status).toBe(200);expect((await cmd('records_backup_finish',body)).status).toBe(200);
+ expect((await get("SELECT count(*) AS n FROM audit_logs WHERE action='records_backup'")).n).toBe(1);expect((await cmd('records_backup_finish',{...body,sha256:randomBytes(32).toString('hex')})).status).toBe(409);
+ const next=await backupStart();await db.prepare('UPDATE messages SET content=? WHERE id=?').bind('已變更的文字',mid).run();const response=await cmd('records_backup_page',{token:next.token,table:'messages'});expect(response.status).toBe(409);expect((await response.json() as any).code).toBe('BACKUP_CHANGED');expect((await cmd('records_backup_finish',{...body,token:next.token})).status).toBe(409);
+});
+it('成功登入會重設帳號失敗計數，含連字號的不同帳號不共用限流桶',async()=>{
+ for(let i=0;i<6;i++)expect((await request('/login',credentials,'','')).status).toBe(200);
+ const hash=(await get('SELECT password_hash FROM admins WHERE id=?','test-admin')).password_hash;
+ for(const name of ['backup-account','backupaccount'])await db.prepare("INSERT INTO admins VALUES(?,?,?,?,'staff',1,?,?)").bind(name,name,'虛構獨立帳號',hash,now(),now()).run();
+ for(let i=0;i<5;i++)expect((await request('/login',{username:'backup-account',password:randomUUID()},'','')).status).toBe(401);
+ expect((await request('/login',{username:'backup-account',password:credentials.password},'','')).status).toBe(429);expect((await request('/login',{username:'backupaccount',password:credentials.password},'','')).status).toBe(200);
+});
+it('教師與帳號啟用狀態拒絕字串偽裝，不存在的對話回 404',async()=>{
+ expect((await cmd('teacher_save',{name:'虛構教師',active:'false'})).status).toBe(400);expect((await cmd('staff_save',{active:'false'})).status).toBe(400);expect((await cmd('conversation_status',{teacher_id:randomUUID(),status:'已完成'})).status).toBe(404);
+});
+it('同一毫秒聊天依實際序號排序，不受 UUID 字母順序影響',async()=>{
+ const tid=await teacher(true),when=now();for(const id of ['z-first-message','a-second-message'])await db.prepare("INSERT INTO messages(id,teacher_id,direction,content,created_at) VALUES(?,?,'in',?,?)").bind(id,tid,id,when).run();
+ const conversation:any=await(await request('/conversation?teacher_id='+tid)).json(),data:any=await(await request('/data')).json();expect(conversation.messages.map((m:any)=>m.id)).toEqual(['z-first-message','a-second-message']);expect(data.messages.map((m:any)=>m.id)).toEqual(['z-first-message','a-second-message']);
+});
+it('清理預覽後正文撤回，即使對話仍已完成，也拒絕刪除舊快照',async()=>{
+ const f=await cleanupFixture(),plan=await cleanupPreview(),m=await get('SELECT id FROM messages WHERE teacher_id=? ORDER BY rowid LIMIT 1',f.tid);await db.prepare("UPDATE messages SET content='（訊息已撤回）',withdrawn=1 WHERE id=?").bind(m.id).run();
+ const r=await cmd('records_cleanup_execute',{job_id:plan.job_id,confirmation:'刪除紀錄'});expect(r.status).toBe(409);expect((await r.json() as any).code).toBe('CLEANUP_CHANGED');expect((await get('SELECT count(*) AS n FROM messages')).n).toBe(2);
+});
 async function cleanupFixture(){
  const tid=await teacher(true),requests=[randomUUID(),randomUUID()];
  for(const request_id of requests)expect((await cmd('send',{request_id,teacher_ids:[tid],kind:'reply',content:'虛構歷史聯絡',last_inbound_id:null})).status).toBe(200);
@@ -204,7 +255,7 @@ describe('Workers / D1 真實本機 Runtime 整合（LINE HTTP 以 Mock 替代�
  });
  it('登入錯誤限制、停用帳號、雜湊不含明碼',async()=>{
   const saved=await get('SELECT password_hash FROM admins WHERE id=?','test-admin');expect(saved.password_hash).not.toContain(credentials.password);
-  for(let i=0;i<4;i++)expect((await request('/login',{username:credentials.username,password:randomUUID()},'','')).status).toBe(401);
+  for(let i=0;i<5;i++)expect((await request('/login',{username:credentials.username,password:randomUUID()},'','')).status).toBe(401);
   expect((await request('/login',credentials,'','')).status).toBe(429);
   await db.prepare('UPDATE admins SET active=0 WHERE id=?').bind('test-staff').run();expect((await request('/session',undefined,staffCookie,staffCsrf)).status).toBe(401);
  });

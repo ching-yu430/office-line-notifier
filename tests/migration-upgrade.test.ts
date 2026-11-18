@@ -1,6 +1,13 @@
 import {it,expect} from 'vitest';
 import {Miniflare} from 'miniflare';
 import {readFileSync} from 'node:fs';
+import {migrationStatements} from './migrations';
+it('0005 備份版本追蹤行政內容，查看與輸入提示不造成備份失效',async()=>{
+ const mf=new Miniflare({modules:true,script:"export default {fetch(){return new Response('測試')}}",compatibilityDate:'2026-07-01',d1Databases:['DB']});
+ try{const db=await mf.getD1Database('DB');await db.batch(migrationStatements().map(sql=>db.prepare(sql)));const now=new Date().toISOString();await db.prepare("INSERT INTO admins VALUES('backup-admin','backup-admin','虛構管理員','測試雜湊','admin',1,?,?)").bind(now,now).run();await db.prepare("INSERT INTO teachers(id,name,created_at,updated_at) VALUES('backup-teacher','虛構教師',?,?)").bind(now,now).run();const version=async()=>Number((await db.prepare('SELECT backup_version FROM system_meta').first())?.backup_version),before=await version();
+ await db.prepare("INSERT INTO conversation_views VALUES('backup-teacher','backup-admin',0,?)").bind(now).run();await db.prepare("INSERT INTO reply_presence VALUES('backup-teacher','backup-admin','test-client',9999999999)").run();expect(await version()).toBe(before);await db.prepare("INSERT INTO messages(id,teacher_id,direction,content,created_at) VALUES('backup-message','backup-teacher','in','新的行政內容',?)").bind(now).run();expect(await version()).toBeGreaterThan(before);expect((await db.prepare('SELECT name FROM teachers').first())?.name).toBe('虛構教師');
+ }finally{await mf.dispose();}
+});
 it('0004 升級保留訊息與綁定，新增清理帳本及已清理發送請求標記',async()=>{
  const mf=new Miniflare({modules:true,script:"export default {fetch(){return new Response('測試')}}",compatibilityDate:'2026-07-01',d1Databases:['DB']});
  try{

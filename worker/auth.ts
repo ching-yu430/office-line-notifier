@@ -1,5 +1,5 @@
 import{type Env,type Actor,HttpError,unix,iso,text,audit}from'./types';
-import{sha256,randomToken,passwordHash,passwordValid,equal,hashCode,isPasswordHashSupported}from'./security';
+import{sha256,randomToken,passwordHash,passwordValid,equal,hmacDigest,isPasswordHashSupported}from'./security';
 export const cookieName=(env:Env)=>env.COOKIE_SECURE==='false'?'office_session':'__Host-office_session';
 export function cookie(value:string,env:Env,age=8*3600){return `${cookieName(env)}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${env.COOKIE_SECURE==='false'?'':'; Secure'}`;}
 export async function limit(env:Env,key:string,max:number,seconds:number){
@@ -21,8 +21,9 @@ export async function login(req:Request,env:Env,body:any){
  const username=text(body.username,'帳號',120).toLowerCase();const password=typeof body.password==='string'?body.password:'';
  if(password.length<1||password.length>256)throw new HttpError(400,'請輸入密碼');
  const ip=req.headers.get('CF-Connecting-IP')||'local';
- await limit(env,'login-ip:'+await hashCode(ip,env.AUTH_PEPPER),30,900);
- await limit(env,'login-account:'+await hashCode(username,env.AUTH_PEPPER),5,900);
+ await limit(env,'login-ip:'+await hmacDigest(ip,env.AUTH_PEPPER),30,900);
+ const accountLimit='login-account:'+await hmacDigest(username,env.AUTH_PEPPER);
+ await limit(env,accountLimit,5,900);
  const actor=await env.DB.prepare('SELECT * FROM admins WHERE username=? COLLATE NOCASE').bind(username).first<Actor&{password_hash:string}>();
  // 不存在的帳號也做同等成本的驗證，不回傳帳號是否存在。
  const hash=isPasswordHashSupported(actor?.password_hash)?actor.password_hash:`pbkdf2-sha256$100000$0000000000000000000000000000000000000000000000000000000000000000$${'0'.repeat(64)}`;
@@ -32,6 +33,7 @@ export async function login(req:Request,env:Env,body:any){
  await env.DB.batch([
   env.DB.prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now),
   env.DB.prepare('DELETE FROM rate_limits WHERE expires_at<=?').bind(now),
+  env.DB.prepare('DELETE FROM rate_limits WHERE key=?').bind(accountLimit),
   env.DB.prepare('INSERT INTO sessions(token_hash,admin_id,csrf_hash,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?,?)').bind(await sha256(token),actor.id,await sha256(csrfToken),csrfToken,now+28800,iso()),
   audit(env.DB,actor.id,'login')
  ]);

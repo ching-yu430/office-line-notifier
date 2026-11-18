@@ -1,5 +1,6 @@
 import {isPickup} from './notice';
 import {mockCleanup} from './mock-cleanup';
+import {mockBackup} from './mock-backup';
 
 export const mock=(import.meta.env.VITE_APP_MODE||'mock')==='mock';
 const base=(import.meta.env.VITE_API_BASE||'/api').replace(/\/$/,'');
@@ -7,10 +8,11 @@ let csrfToken='',etag='',cached:Data|null=null,cacheGeneration=0;
 function clearCache(){cacheGeneration++;etag='';cached=null;loadingData=null;}
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string){super(message);}}
 async function request(path:string,body?:unknown,extra:Record<string,string>={}){
+ const generation=cacheGeneration;
  let response:Response;
  try{response=await fetch(base+path,{method:body===undefined?'GET':'POST',credentials:'include',headers:{...(body===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':csrfToken}),...extra},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(path==='/command'?65000:20000)});}catch{throw new ApiError(0,path==='/command'?'連線中斷，操作可能已完成；請先查詢紀錄，避免重複操作':'無法連線至後端，請確認網路與服務狀態');}
  if(response.status===304)return response;
- if(!response.ok){let message='操作失敗，請稍後重試',code:string|undefined;try{const body=await response.json() as any;message=body.error||message;code=body.code;}catch{}if(response.status===401){csrfToken='';clearCache();window.dispatchEvent(new Event('office-session-expired'));}throw new ApiError(response.status,message,code);}
+ if(!response.ok){let message='操作失敗，請稍後重試',code:string|undefined;try{const body=await response.json() as any;message=body.error||message;code=body.code;}catch{}if(response.status===401&&generation===cacheGeneration){csrfToken='';clearCache();window.dispatchEvent(new Event('office-session-expired'));}throw new ApiError(response.status,message,code);}
  return response;
 }
 export async function getSession(){try{const r=await request('/session');const result:any=await r.json();csrfToken=result.csrf;return result.actor;}catch(e){if(e instanceof ApiError&&e.status===401)return null;throw e;}}
@@ -29,7 +31,7 @@ export type Teacher={conversation_version?:number;id:string;name:string;departme
 export type Notice={pickup_name?:string|null;id:string;teacher_id:string;kind:string;content:string;important:boolean;send_status:string;status:string;created_at:string;sent_at?:string|null;sender_id:string;completed_at?:string;completed_by?:string;error_code?:string;version?:number;latest_reply?:string|null;latest_reply_at?:string|null};
 export type NoticePage={notices:Notice[];total:number;page:number;pages:number;page_size:number};
 export async function loadNoticePage(params:URLSearchParams):Promise<NoticePage>{return (await request('/notifications/query',Object.fromEntries(params))).json();}
-export type Message={id:string;teacher_id:string;direction:string;content:string;created_at:string;notification_id?:string;withdrawn?:boolean;sender_name?:string};
+export type Message={sequence?:number;id:string;teacher_id:string;direction:string;content:string;created_at:string;notification_id?:string;withdrawn?:boolean;sender_name?:string};
 export type Handover={id:string;content:string;created_by:string;creator_name:string;handover_name:string;created_at:string;completed_at:string|null;completed_by:string|null;completed_name:string|null;finisher_name:string|null;version:number};
 export type InternalNote={id:string;teacher_id:string;content:string;author_id:string;author_name:string;created_at:string};
 export type HandoverRevision={id:string;handover_id:string;action:string;actor_id:string;actor_name:string;before_data:Handover|null;after_data:Handover;reason:string|null;created_at:string};
@@ -41,12 +43,13 @@ export type Data={inbox?:InboxItem[];presence?:Presence[];teachers:Teacher[];not
 const now=()=>new Date().toISOString();
 const defaults:Data={internal_notes:[],handover_revisions:[],handovers:[],conversations:[],teachers:[{id:'demo-1',name:'示範教師甲',department:'教務處',notes:'虛構示範資料',active:true,bound_at:now(),last_notified_at:now()},{id:'demo-2',name:'示範教師乙',department:'學務處',notes:'虛構示範資料',active:true,bound_at:null,last_notified_at:null},{id:'demo-3',name:'示範教師丙',department:'總務處',notes:'虛構示範資料',active:true,bound_at:now(),last_notified_at:now()}],notifications:[{id:'n1',teacher_id:'demo-1',kind:'parcel',content:'您的包裹已送達辦公室，請撥空領取。',important:false,send_status:'accepted',status:'待領取',created_at:now(),sender_id:'demo-admin'},{id:'n2',teacher_id:'demo-3',kind:'contact',content:'辦公室有事項需要與您聯繫。',important:true,send_status:'accepted',status:'待回覆',created_at:now(),sender_id:'demo-admin'}],messages:[{id:'m1',teacher_id:'demo-1',direction:'out',content:'您的包裹已送達辦公室，請撥空領取。',created_at:now()},{id:'m2',teacher_id:'demo-1',direction:'in',content:'謝謝通知，我會在午休時間到辦公室領取。',created_at:now()}],staff:[{id:'demo-admin',display_name:'示範管理員',role:'admin',active:true},{id:'demo-staff',display_name:'示範行政人員',role:'staff',active:true}],templates:[{kind:'mail',label:'實體信件',content:'您的信件已送達辦公室，請撥空領取。'},{kind:'parcel',label:'包裹通知',content:'您的包裹已送達辦公室，請撥空領取。'},{kind:'contact',label:'行政聯絡',content:'辦公室有事項需要與您聯繫。'},{kind:'custom',label:'自訂訊息',content:''}],audit_logs:[]};
 const storageKey='office-line-demo-v1';
-function initialDemo():Data{if(mock){try{return JSON.parse(localStorage.getItem(storageKey)||'null')||structuredClone(defaults);}catch{}}return structuredClone(defaults);}
+function validDemo(value:any){return value&&typeof value==='object'&&!Array.isArray(value)&&['teachers','notifications','messages','staff','templates','audit_logs'].every(k=>Array.isArray(value[k]))&&['conversations','handovers','internal_notes','handover_revisions','views','undo_actions','presence'].every(k=>value[k]==null||Array.isArray(value[k]));}
+function initialDemo():Data{if(mock){try{const saved=JSON.parse(localStorage.getItem(storageKey)||'null');if(validDemo(saved))return saved;}catch{}}return structuredClone(defaults);}
 type DemoData=Data&{archived_requests?:string[];operation_requests?:Record<string,{fingerprint:string;actor:string}>;views?:{teacher_id:string;admin_id:string;sequence:number}[];undo_actions?:{id:string;actor_id:string;type:'notification'|'handover';before:any;after_version:number;expires_at:number;used?:boolean}[]};
 let demo:DemoData=initialDemo();
 function normalize(){demo.operation_requests ||= {};demo.views ||= [];demo.undo_actions ||= [];demo.presence ||= [];for(const n of demo.notifications)n.version ??=1;demo.conversations ||= [];demo.handovers ||= [];demo.internal_notes ||= [];demo.handover_revisions ||= [];for(const h of demo.handovers){h.handover_name ??=h.creator_name;h.finisher_name ??=h.completed_name;h.version ??=1;}}
 normalize();
-function readLatestDemo(){try{const saved=localStorage.getItem(storageKey);if(saved)demo=JSON.parse(saved);}catch{}normalize();}
+function readLatestDemo(){try{const saved=JSON.parse(localStorage.getItem(storageKey)||'null');if(validDemo(saved))demo=saved;}catch{}normalize();}
 let demoRole='admin';
 // Volatile only: do not persist plaintext demo codes.
 const codes=new Map<string,{teacher_id:string;expires:number}>();
@@ -89,10 +92,11 @@ export async function loadConversation(teacherId:string):Promise<{messages:Messa
 export async function command(action:string,payload:any={}):Promise<any>{
  if(!mock)return (await request('/command',{action,payload})).json();
  readLatestDemo();
- if((['teacher_save','issue_code','unbind','staff_save','template_save','mock_cleanup_seed'].includes(action)||action.startsWith('records_cleanup_'))&&demoRole!=='admin')throw Error('需要管理員權限');
+ if((['teacher_save','issue_code','unbind','staff_save','template_save','mock_cleanup_seed'].includes(action)||action.startsWith('records_cleanup_')||action.startsWith('records_backup_'))&&demoRole!=='admin')throw Error('需要管理員權限');
  const t=demo.teachers.find(t=>t.id===payload.teacher_id);
  let result:any={};
  const actor=demoRole==='admin'?'demo-admin':'demo-staff',actorName=demo.staff.find(s=>s.id===actor)?.display_name||'行政人員';
+ const backup=mockBackup(action,payload,demo,actor);if(backup!==undefined){if(action==='records_backup_finish')persist();return backup;}
  const cleanup=mockCleanup(action,payload,demo,actor);if(cleanup!==undefined){if(action!=='records_cleanup_preview')persist();return cleanup;}
  if(action==='notification_preflight')return {pending:demo.teachers.filter(t=>payload.teacher_ids.includes(t.id)).map(t=>({teacher_id:t.id,name:t.name,count:demo.notifications.filter(n=>n.teacher_id===t.id&&isPickup(n)&&n.status==='待領取').length})).filter(t=>t.count)};
  if(action==='pickup_many'||action==='undo_many'){

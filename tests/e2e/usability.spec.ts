@@ -1,3 +1,4 @@
+import {expectConversationStatus,chooseConversationStatus} from './chat-tools';
 import {openPickups,openNotes,openDemoTools} from './chat-tools';
 import {test,expect,type Page} from '@playwright/test';
 async function chat(page:Page){await page.getByRole('button',{name:/^訊息中心/}).click();await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();}
@@ -17,7 +18,7 @@ test('對話排序與搜尋、未查看提示依登入人員更新，查看不�
   localStorage.setItem('office-line-demo-v1',JSON.stringify({teachers,notifications:[],messages:[{id:'ma',teacher_id:'a',direction:'in',content:'甲先前問題',created_at:older},{id:'mc',teacher_id:'c',direction:'in',content:'丙待回覆',created_at:old},{id:'mb',teacher_id:'b',direction:'out',content:'乙最新已回覆',created_at:now}],staff:[{id:'demo-admin',display_name:'示範管理員',role:'admin',active:true},{id:'demo-staff',display_name:'示範行政人員',role:'staff',active:true}],templates:[],audit_logs:[],conversations:[{teacher_id:'a',status:'待回覆'},{teacher_id:'b',status:'已完成'},{teacher_id:'c',status:'待回覆'}],handovers:[],internal_notes:[],handover_revisions:[]}));
  });
  await page.goto('/');await page.getByRole('button',{name:/^訊息中心/}).click();const rows=page.locator('.chat-teacher');await expect(rows.nth(0)).toContainText('教師丙');await expect(rows.nth(1)).toContainText('教師甲');await expect(rows.nth(2)).toContainText('教師乙');
- await page.getByLabel('搜尋教師對話').fill('總務處');await expect(rows).toHaveCount(1);await expect(page.getByLabel('教師丙有 1 則未查看訊息')).toBeVisible();await rows.click();await expect(page.getByLabel('教師丙有 1 則未查看訊息')).toHaveCount(0);await expect(page.getByLabel('對話處理狀態')).toHaveValue('待回覆');
+ await page.getByLabel('搜尋教師對話').fill('總務處');await expect(rows).toHaveCount(1);await expect(page.getByLabel('教師丙有 1 則未查看訊息')).toBeVisible();await rows.click();await expect(page.getByLabel('教師丙有 1 則未查看訊息')).toHaveCount(0);await expectConversationStatus(page,'待回覆');
  await page.getByRole('button',{name:'切換為行政人員'}).click();await expect(page.getByLabel('教師丙有 1 則未查看訊息')).toHaveCount(0);await page.getByLabel('搜尋教師對話').fill('');await expect(page.getByLabel('教師甲有 1 則未查看訊息')).toBeVisible();
 });
 

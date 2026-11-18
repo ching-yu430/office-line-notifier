@@ -1,11 +1,12 @@
 import {useEffect,useRef,useState} from 'react';
-import {Search,Send,ArrowLeft,Package,Mail,Check} from 'lucide-react';
+import {Search,Send,ArrowLeft,Check} from 'lucide-react';
 import {command,ApiError,mock,type Data} from './api';
 import {failureText} from './workflow';
 import {DuplicateWarning,type PendingPickup} from './DuplicateWarning';
+import {NoticeIcon} from './NoticeIcon';
 import {pickupMessage} from './notice';
 export function QuickNotice({data,kind,busy,onAction,onClose,initialTeacherId=''}:{data:Data;kind:'parcel'|'mail'|'pickup';initialTeacherId?:string;busy:boolean;onAction:(action:string,payload:any,success?:string)=>Promise<any>;onClose:()=>void}){
- const label=kind==='parcel'?'包裹通知':kind==='mail'?'信件通知':'其他待領物品',Icon=kind==='parcel'?Package:Mail;
+ const label=kind==='parcel'?'包裹通知':kind==='mail'?'信件通知':'其他待領物品';
  const [query,setQuery]=useState(''),[teacherId,setTeacherId]=useState(initialTeacherId),[pickupName,setPickupName]=useState(''),[location,setLocation]=useState(''),[content,setContent]=useState(()=>kind==='pickup'?pickupMessage(''):data.templates.find(t=>t.kind===kind)?.content||''),[preview,setPreview]=useState(false),[error,setError]=useState('');
  const [pending,setPending]=useState<PendingPickup[]>([]),[checking,setChecking]=useState(false),[checkError,setCheckError]=useState(''),[retry,setRetry]=useState(0);
  useEffect(()=>{if(!preview)return;let cancelled=false;setChecking(true);setCheckError('');void command('notification_preflight',{teacher_ids:[teacherId]}).then(r=>{if(!cancelled)setPending(r.pending);}).catch(e=>{if(!cancelled)setCheckError((e as Error).message);}).finally(()=>{if(!cancelled)setChecking(false);});return()=>{cancelled=true;};},[preview,teacherId,retry]);
@@ -16,7 +17,7 @@ export function QuickNotice({data,kind,busy,onAction,onClose,initialTeacherId=''
   if(!valid||busy||checking||checkError||sending.current)return;sending.current=true;setError('');
   try{const r=await onAction('send',{teacher_ids:[teacherId],kind,content:message,request_id:request.current,...(kind==='pickup'?{pickup_name:pickupName.trim()}:{}),duplicate_confirmed:pending.length>0},'');const n=r.results?.[0];if(n?.send_status==='accepted')onClose();else{if(n?.send_status==='failed')request.current=crypto.randomUUID();setError(failureText(n?.error_code));}}catch(e){setError((e as Error).message);if(e instanceof ApiError&&e.code==='DUPLICATE_NOTICE'){request.current=crypto.randomUUID();setRetry(n=>n+1);}}finally{sending.current=false;}
  };
- return <div className="quick-notice"><h2><Icon size={22}/>{preview?'確認發送'+label:label}</h2>{preview?<>
+ return <div className="quick-notice"><h2><NoticeIcon kind={kind} size={22}/>{preview?'確認發送'+label:label}</h2>{preview?<>
   <div className="recipient-tags"><span>{teacher?.name} · {teacher?.department}</span></div>{kind==='pickup'&&<p className="pickup-preview-name">待領物品：{pickupName}</p>}<div className="preview-bubble">{message}</div><p className="hint">{mock?'模擬發送，不會連接 LINE。':'將傳送一則 LINE 私訊。'}</p>
   <DuplicateWarning pending={pending}/>{checking&&<p role="status">正在核對待領取紀錄…</p>}{checkError&&<div className="error" role="alert">{checkError}<button onClick={()=>setRetry(n=>n+1)}>重新核對</button></div>}{error&&<div className="error" role="alert">{error}</div>}<div className="quick-actions"><button className="outline" disabled={busy} onClick={()=>{setPreview(false);request.current=crypto.randomUUID();}}><ArrowLeft size={16}/>返回編輯</button><button className="primary" disabled={busy||!valid||checking||!!checkError} onClick={()=>void send()}><Send size={16}/>{busy?'送出中…':pending.length?'確認仍需通知':'確認發送給 1 位教師'}</button></div>
  </>:<form onSubmit={e=>{e.preventDefault();if(valid)setPreview(true);}}>

@@ -1,5 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
-import {openPickups,openNotes} from './chat-tools';
+import {openPickups,openNotes,expectConversationStatus,chooseConversationStatus} from './chat-tools';
 async function chat(page:Page,name='示範教師甲'){await page.getByRole('button',{name:/^訊息中心/}).click();if(await page.getByRole('button',{name:'返回教師列表'}).isVisible())await page.getByRole('button',{name:'返回教師列表'}).click();await page.locator('.chat-teacher').filter({hasText:name}).click();}
 
 test('訊息中心預設只顯示對話，領件與備註按需切換，常用回覆折疊',async({page},info)=>{
@@ -22,4 +22,10 @@ test('批次自填待領物品名稱必填，保留重複提醒並顯示正確�
 test('手機保持聊天空間，輔助面板可關閉，新增物品預選正確教師',async({page},info)=>{
  await page.setViewportSize({width:390,height:844});await page.goto('/');await chat(page);await expect(page.locator('.conversation-tools')).toHaveCount(0);const feed=await page.locator('.chat-feed').boundingBox();expect(feed!.height).toBeGreaterThan(260);const send=await page.getByRole('button',{name:'送出',exact:true}).boundingBox();expect(send!.y+send!.height).toBeLessThanOrEqual(844);await page.screenshot({path:info.outputPath('clean-mobile-chat.png'),animations:'disabled'});
  await openPickups(page);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:info.outputPath('mobile-pickup-panel.png'),animations:'disabled'});await page.locator('.chat-pickups').getByRole('button',{name:'新增物品',exact:true}).click();await expect(page.getByRole('dialog').locator('.quick-selection-summary')).toContainText('示範教師甲');await expect(page.getByLabel('物品名稱',{exact:true})).toBeVisible();await page.getByRole('button',{name:'關閉',exact:true}).click();await page.getByRole('button',{name:'關閉輔助面板'}).click();await expect(page.getByLabel('回覆老師',{exact:true})).toBeVisible();
+});
+
+test('可直接看見與切換對話狀態，重複點同一狀態不新增操作，教師彼此獨立',async({page})=>{
+ await page.goto('/');await chat(page);await expect(page.getByRole('combobox',{name:'對話處理狀態'})).toHaveCount(0);await expectConversationStatus(page,'待回覆');await chooseConversationStatus(page,'已完成');await expectConversationStatus(page,'已完成');
+ const audits=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('office-line-demo-v1')!).audit_logs.filter((a:any)=>a.action==='conversation_status').length);const count=await audits();await chooseConversationStatus(page,'已完成');expect(await audits()).toBe(count);
+ await page.locator('.chat-teacher').filter({hasText:'示範教師丙'}).click();await chooseConversationStatus(page,'待回覆');await expectConversationStatus(page,'待回覆');await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();await expectConversationStatus(page,'已完成');
 });

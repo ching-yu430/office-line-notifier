@@ -92,7 +92,7 @@ export async function loadConversation(teacherId:string):Promise<{messages:Messa
 export async function command(action:string,payload:any={}):Promise<any>{
  if(!mock)return (await request('/command',{action,payload})).json();
  readLatestDemo();
- if((['teacher_save','issue_code','unbind','staff_save','template_save','mock_cleanup_seed'].includes(action)||action.startsWith('records_cleanup_')||action.startsWith('records_backup_'))&&demoRole!=='admin')throw Error('需要管理員權限');
+ if((['teacher_save','issue_code','unbind','staff_save','template_save','mock_cleanup_seed','mock_cleanup_failed_seed'].includes(action)||action.startsWith('records_cleanup_')||action.startsWith('records_backup_'))&&demoRole!=='admin')throw Error('需要管理員權限');
  const t=demo.teachers.find(t=>t.id===payload.teacher_id);
  let result:any={};
  const actor=demoRole==='admin'?'demo-admin':'demo-staff',actorName=demo.staff.find(s=>s.id===actor)?.display_name||'行政人員';

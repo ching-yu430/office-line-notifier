@@ -17,7 +17,7 @@ export async function notificationHistory(env:Env,actor:Actor,params:URLSearchPa
  if(teacher){where.push('n.teacher_id=?');args.push(id(teacher));}
  if(status){if(!['待領取','待回覆','已完成'].includes(status))throw new HttpError(400,'處理狀態錯誤');where.push('n.status=?');args.push(status);}
  if(send){
-  if(send==='attention')where.push("n.send_status IN ('failed','uncertain')");
+  if(send==='attention')where.push("n.send_status IN ('failed','uncertain') AND n.status!='已完成'");
   else{if(!['queued','sending','accepted','failed','uncertain'].includes(send))throw new HttpError(400,'發送結果錯誤');where.push('n.send_status=?');args.push(send);}
  }
  if(query){where.push("instr(lower(t.name || ' ' || n.content || ' ' || coalesce(n.pickup_name,'')),lower(?))>0");args.push(query);}

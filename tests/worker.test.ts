@@ -527,3 +527,53 @@ it('輕量版本檢查有 Session 與來源保護，無變更回 304 且不產�
  expect((await request('/changes',undefined,'','')).status).toBe(401);expect((await request('/changes',undefined,cookie,csrf,{Origin:'https://other.example'})).status).toBe(403);
  const t=await get('SELECT * FROM teachers WHERE id=?',tid),v=t.conversation_version;await hook([ev('新文字',t.line_user_id)]);expect((await get('SELECT conversation_version FROM teachers WHERE id=?',tid)).conversation_version).toBeGreaterThan(v);
 });
+
+const failedCleanupInput={...cleanupInput,contact:false,handovers:false,audits:false,failed:true,all_dates:true};
+async function failedCleanupFixture(){
+ const tid=await teacher(true),requests=[randomUUID(),randomUUID()];lineStatus=401;
+ for(const request_id of requests)expect((await cmd('send',{request_id,teacher_ids:[tid],kind:'contact',content:'虛構 401 失敗通知'})).status).toBe(200);
+ lineStatus=200;await db.prepare('UPDATE notifications SET created_at=? WHERE teacher_id=?').bind(new Date(Date.now()-10000).toISOString(),tid).run();
+ return {tid,requests,notices:await db.prepare('SELECT * FROM notifications WHERE teacher_id=? ORDER BY id').bind(tid).all<any>()};
+}
+it('已處理的歷史失敗不再列入需檢查，仍可查詢原始失敗原因',async()=>{
+ const f=await failedCleanupFixture(),n=f.notices.results[0];await cmd('complete',{id:n.id,status:'已完成',expected_version:n.version});
+ const pending:any=await(await request('/notifications/query',{send:'attention',teacher:f.tid})).json();expect(pending.total).toBe(1);
+ const history:any=await(await request('/notifications/query',{send:'failed',teacher:f.tid})).json();expect(history.total).toBe(2);expect(history.notices.every((n:any)=>n.error_code==='line_http_401')).toBe(true);
+});
+it('全部日期可清理兩筆最近的 401 失敗，封存防重送且保留待發送、未明、已送出與被聊天引用的紀錄',async()=>{
+ const f=await failedCleanupFixture(),original=f.notices.results[0],kept:string[]=[];
+ for(const [sendStatus,sentAt,referenced]of [['queued',null,false],['sending',null,false],['uncertain',null,false],['accepted',new Date().toISOString(),false],['failed',new Date().toISOString(),false],['failed',null,true]] as const){
+  const nid=randomUUID();kept.push(nid);await db.prepare(`INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,send_status,status,error_code,created_at,sent_at) VALUES(?,?,?,'contact','保留的虛構紀錄','test-admin',1,?,?,'待回覆','line_http_401',?,?)`).bind(nid,randomUUID(),f.tid,randomUUID(),sendStatus,original.created_at,sentAt).run();
+  if(referenced)await db.prepare("INSERT INTO messages(id,teacher_id,direction,content,created_at,notification_id) VALUES(?,?,'in','保留的最後聊天',?,?)").bind(randomUUID(),f.tid,original.created_at,nid).run();
+ }
+ const before=calls.length,defaultResult=await cleanupPreview();expect(defaultResult.counts.notifications).toBe(0);
+ const r=await cmd('records_cleanup_preview',failedCleanupInput);expect(r.status).toBe(200);const p:any=await r.json();expect(p.all_dates).toBe(true);expect(p.counts.notifications).toBe(2);expect(p.counts.failed_notifications).toBe(2);
+ const payload={job_id:p.job_id,confirmation:'刪除紀錄'};expect((await cmd('records_cleanup_execute',payload)).status).toBe(200);expect((await cmd('records_cleanup_execute',payload)).status).toBe(200);
+ expect((await get('SELECT count(*) AS n FROM notifications')).n).toBe(kept.length);expect((await get('SELECT count(*) AS n FROM messages')).n).toBe(1);expect((await get('SELECT count(*) AS n FROM send_requests WHERE archived_at IS NOT NULL')).n).toBe(2);
+ for(const nid of kept)expect(await get('SELECT id FROM notifications WHERE id=?',nid)).toBeTruthy();expect(calls.length).toBe(before);
+ const retry=await cmd('send',{request_id:f.requests[0],teacher_ids:[f.tid],kind:'contact',content:'虛構 401 失敗通知'});expect(retry.status).toBe(409);expect((await retry.json() as any).code).toBe('RECORDS_CLEANED');expect(calls.length).toBe(before);
+ const audit=JSON.parse((await get("SELECT details FROM audit_logs WHERE action='records_cleanup'")).details);expect(audit.all_dates).toBe(true);expect(audit.counts.failed_notifications).toBe(2);
+});
+it('失敗通知清理預覽後狀態變更會整批拒絕，不部分刪除',async()=>{
+ const f=await failedCleanupFixture(),r=await cmd('records_cleanup_preview',failedCleanupInput);expect(r.status).toBe(200);const p:any=await r.json();
+ await db.prepare("UPDATE notifications SET send_status='uncertain' WHERE id=?").bind(f.notices.results[0].id).run();const result=await cmd('records_cleanup_execute',{job_id:p.job_id,confirmation:'刪除紀錄'});expect(result.status).toBe(409);expect((await result.json() as any).code).toBe('CLEANUP_CHANGED');expect((await get('SELECT count(*) AS n FROM notifications')).n).toBe(2);expect((await get('SELECT count(*) AS n FROM send_requests WHERE archived_at IS NOT NULL')).n).toBe(0);
+});
+
+it('全部日期涵蓋今天已完成的紀錄，固定預覽目標且相容舊版清理快照',async()=>{
+ const f=await cleanupFixture(),at=new Date(Date.now()-10000).toISOString();
+ await db.prepare('UPDATE notifications SET created_at=?,completed_at=?,sent_at=? WHERE teacher_id=?').bind(at,at,at,f.tid).run();await db.prepare('UPDATE messages SET created_at=? WHERE teacher_id=?').bind(at,f.tid).run();await db.prepare('UPDATE handovers SET created_at=?,completed_at=? WHERE id=?').bind(at,at,f.hid).run();
+ const old=await cleanupPreview();expect(old.counts.notifications).toBe(0);expect(old.counts.messages).toBe(0);expect(old.counts.handovers).toBe(0);
+ const response=await cmd('records_cleanup_preview',{...cleanupInput,all_dates:true});expect(response.status).toBe(200);const p:any=await response.json();expect(p.counts.notifications).toBe(1);expect(p.counts.messages).toBe(1);expect(p.counts.handovers).toBe(1);
+ await db.prepare("UPDATE record_cleanup_jobs SET plan_json=json_remove(plan_json,'$.failed') WHERE id=?").bind(p.job_id).run();
+ const later=randomUUID();await cmd('handover_create',{id:later,content:'預覽後新增的虛構交接',handover_name:'虛構交接人'});await cmd('handover_complete',{id:later,expected_version:1,finisher_name:'虛構完成人'});await db.prepare('UPDATE handovers SET created_at=?,completed_at=? WHERE id=?').bind(at,at,later).run();
+ expect((await cmd('records_cleanup_execute',{job_id:p.job_id,confirmation:'刪除紀錄'})).status).toBe(200);expect(await get('SELECT id FROM handovers WHERE id=?',f.hid)).toBeNull();expect(await get('SELECT id FROM handovers WHERE id=?',later)).toBeTruthy();expect((await get('SELECT count(*) AS n FROM messages')).n).toBe(1);
+});
+it('失敗通知清理遇到 SQL 錯誤會回滾，保留失敗紀錄及發送帳本',async()=>{
+ await failedCleanupFixture();const response=await cmd('records_cleanup_preview',failedCleanupInput);expect(response.status).toBe(200);const p:any=await response.json();
+ await db.prepare("CREATE TRIGGER test_failed_cleanup_abort BEFORE DELETE ON notifications BEGIN SELECT RAISE(ABORT,'test_failed_cleanup_failure'); END").run();
+ try{expect((await cmd('records_cleanup_execute',{job_id:p.job_id,confirmation:'刪除紀錄'})).status).toBe(500);expect((await get('SELECT count(*) AS n FROM notifications')).n).toBe(2);expect((await get('SELECT count(*) AS n FROM send_requests WHERE archived_at IS NOT NULL')).n).toBe(0);expect((await get('SELECT state FROM record_cleanup_jobs WHERE id=?',p.job_id)).state).toBe('preview');}finally{await db.prepare('DROP TRIGGER test_failed_cleanup_abort').run();}
+});
+it('新的清理日期及失敗選項仍驗證布林值、管理員與 CSRF',async()=>{
+ for(const p of [{...failedCleanupInput,failed:'true'},{...failedCleanupInput,all_dates:'true'},{...failedCleanupInput,failed:null}])expect((await cmd('records_cleanup_preview',p)).status).toBe(400);
+ expect((await cmd('records_cleanup_preview',failedCleanupInput,staffCookie,staffCsrf)).status).toBe(403);expect((await cmd('records_cleanup_preview',failedCleanupInput,cookie,'wrong')).status).toBe(403);expect((await get('SELECT count(*) AS n FROM record_cleanup_jobs')).n).toBe(0);
+});

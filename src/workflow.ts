@@ -1,8 +1,9 @@
 import type {Data,Notice} from './api';
 export {kindLabel} from './notice';
 import {isPickup} from './notice';
-export function noticeStatus(n:Pick<Notice,'kind'|'status'|'pickup_name'>){
+export function noticeStatus(n:Pick<Notice,'kind'|'status'|'pickup_name'>&Partial<Pick<Notice,'send_status'>>){
  if(n.status!=='已完成')return n.status;
+ if(n.send_status==='failed')return '已處理';
  return isPickup(n)?'已領取':n.kind==='reply'?'已回覆':'已處理';
 }
 export function failureText(code?:string|null){

@@ -9,6 +9,7 @@ export function noticeStatus(n:Pick<Notice,'kind'|'status'|'pickup_name'>&Partia
 export function failureText(code?:string|null){
  if(code==='line_http_401'||code==='line_http_403')return 'LINE 連線設定需要更新，請通知管理員檢查。';
  if(code==='line_http_429')return 'LINE 訊息額度或發送頻率受限，請通知管理員檢查。';
+ if(code==='item_closed')return '物品已領取或取消，通知未送出。';
  if(code==='binding_changed')return '教師的 LINE 綁定已變更，請確認身分後再發送。';
  if(code==='line_http_400')return 'LINE 無法處理這則訊息，請通知管理員檢查教師綁定及內容。';
  if(code==='network_or_timeout'||code==='worker_interrupted'||/^line_http_5/.test(code||''))return '發送結果尚未確認，請先查詢紀錄，避免重複發送。';

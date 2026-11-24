@@ -74,3 +74,6 @@ SQL 備份不包含 Cloudflare Secrets，金鑰需另外安全保管。還原應
 HTML 預覽的同一個按鈕可產生虛構資料 ZIP，不連接正式 API。自動資料夾功能取決於使用者瀏覽器及權限，Windows 原生資料夾選擇仍需在你的電腦驗收。
 
 正式更新前先備份，依序套用尚未執行的 0003、0004，以及新增 **0005_record_exports.sql**。0005 只新增備份版本與觸發器，不會備份或刪除現有紀錄，不需新增帳密或 Secrets。更新檔案與 Windows 指令見 [整合更新說明](CONVERSATION-UPDATE.md)。
+
+
+2026.11.24.1 起，內容 ZIP 另含 `pickup_items` 物品登記，通知包含 `pickup_item_id`、交接包含 `teacher_id`。升級前仍須另存完整 D1 SQL；內容 ZIP 不包含登入、LINE 身分或 Secrets，不能取代可還原的完整資料庫備份。

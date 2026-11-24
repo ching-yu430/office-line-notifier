@@ -9,8 +9,10 @@ import {pickupCommand} from './pickups';
 import{APP_VERSION}from'../src/version';
 import {recordCleanup} from './record-cleanup';
 import {recordBackup} from './record-backup';
+import {pickupItemCommand} from './pickup-items';
 export async function command(env:Env,actor:Actor,action:string,p:any){
  const db=env.DB,now=iso();
+ const itemResult=await pickupItemCommand(env,actor,action,p);if(itemResult!==undefined)return itemResult;
  const backup=await recordBackup(env,actor,action,p);if(backup!==undefined)return backup;
  const cleanup=await recordCleanup(env,actor,action,p);if(cleanup!==undefined)return cleanup;
  const pickup=await pickupCommand(env,actor,action,p);if(pickup!==undefined)return pickup;
@@ -55,6 +57,11 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
   await db.batch([db.prepare('INSERT INTO internal_notes(id,teacher_id,content,author_id,author_name,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(nid,tid,content,actor.id,actor.display_name,now),db.prepare(`INSERT INTO audit_logs(id,actor_id,action,internal_note_id,created_at) SELECT ?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM audit_logs WHERE internal_note_id=?)`).bind(crypto.randomUUID(),actor.id,action,nid,now,nid)]);
   const result=await db.prepare('SELECT * FROM internal_notes WHERE id=?').bind(nid).first<any>();if(result.content!==content||result.teacher_id!==tid||result.author_id!==actor.id)throw new HttpError(409,'重複請求內容不一致');return {data:result};
  }
+ if(action==='handover_revisions'){
+  const hid=id(p.id);if(!await db.prepare('SELECT id FROM handovers WHERE id=?').bind(hid).first())throw new HttpError(404,'交接事項不存在');
+  const revisions=await rows(db.prepare('SELECT id,handover_id,action,actor_id,actor_name,before_data,after_data,reason,created_at FROM handover_revisions WHERE handover_id=? ORDER BY created_at DESC,rowid DESC').bind(hid));
+  return {items:revisions.map(row=>({...row,before_data:row.before_data?JSON.parse(row.before_data):null,after_data:JSON.parse(row.after_data)}))};
+ }
  if(action.startsWith('handover_'))return handover(env,actor,action,p);
  if(action==='conversation_status'){
   if(!['待回覆','已完成'].includes(p.status))throw new HttpError(400,'對話狀態錯誤');
@@ -68,6 +75,15 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
   const pickup=isPickup({kind,pickup_name:pickupName});
   if(!['mail','parcel','contact','custom','reply'].includes(kind)||!Array.isArray(p.teacher_ids)||p.teacher_ids.length<1||p.teacher_ids.length>100)throw new HttpError(400,'通知類型或對象錯誤，每批 1 至 100 位');
   const ids=[...new Set<string>(p.teacher_ids.map(id))].sort();
+  const pickupItemId=p.pickup_item_id?id(p.pickup_item_id):null;
+  if(pickupItemId){
+   if(!pickup||ids.length!==1)throw new HttpError(400,'重新通知一次限一筆物品');
+   const item=await db.prepare('SELECT * FROM pickup_items WHERE id=?').bind(pickupItemId).first<any>();
+   if(!item||item.teacher_id!==ids[0]||item.status!=='待領取'||item.kind!==kind||(item.pickup_name||null)!==pickupName)throw new HttpError(409,'物品已更新或不再待領取');
+   const pending=await db.prepare("SELECT id FROM notifications WHERE pickup_item_id=? AND send_status IN ('queued','sending','uncertain')").bind(pickupItemId).first();
+   const repeated=await db.prepare('SELECT id FROM notifications WHERE request_id=?').bind(request).first();
+   if(pending&&!repeated)throw new HttpError(409,'此物品仍有待發送或結果未明的通知，請先核對紀錄');
+  }
   let reply:ReplyCompletion|undefined;
   if(kind==='reply'){
    if(ids.length!==1)throw new HttpError(400,'聊天回覆一次限一位教師');
@@ -78,24 +94,24 @@ export async function command(env:Env,actor:Actor,action:string,p:any){
    }
   }
   if(p.duplicate_confirmed!=null&&typeof p.duplicate_confirmed!=='boolean')throw new HttpError(400,'重複通知確認格式錯誤');
-  const fingerprint=await sha256(JSON.stringify({ids,content,kind,...(pickupName?{pickup_name:pickupName}:{}),...(reply?{reply}:{}),...(p.duplicate_confirmed?{duplicate_confirmed:true}:{})}));
+  const fingerprint=await sha256(JSON.stringify({ids,content,kind,...(pickupName?{pickup_name:pickupName}:{}),...(reply?{reply}:{}),...(pickupItemId?{pickup_item_id:pickupItemId}:{}),...(p.duplicate_confirmed?{duplicate_confirmed:true}:{})}));
   const existing=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();
   if(existing?.archived_at)throw new HttpError(409,'此發送請求的舊紀錄已清理，不能再次發送','RECORDS_CLEANED');
   if(existing&&(existing.fingerprint!==fingerprint||existing.actor_id!==actor.id))throw new HttpError(409,'重複請求內容不一致');
   await limit(env,'send:'+actor.id,30,60);
   const items=ids.map(tid=>({id:crypto.randomUUID(),teacher_id:tid,retry_key:crypto.randomUUID()}));
   // 單一 JSON 參數批次建立，維持 100 位上限並避免超過免費方案每次 D1 查詢／參數上限。
-  const statements=[db.prepare(`INSERT INTO send_requests(id,actor_id,fingerprint,created_at) SELECT ?,?,?,? WHERE ?=1 OR NOT EXISTS(SELECT 1 FROM notifications WHERE teacher_id IN(SELECT value FROM json_each(?)) AND (kind IN ('mail','parcel') OR pickup_name IS NOT NULL) AND status='待領取') ON CONFLICT(id) DO NOTHING`).bind(request,actor.id,fingerprint,now,!pickup||p.duplicate_confirmed===true?1:0,JSON.stringify(ids)),
-   db.prepare(`INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,status,created_at,pickup_name)
-   SELECT json_extract(j.value,'$.id'),?,json_extract(j.value,'$.teacher_id'),?,?,?,coalesce(t.binding_version,-1),json_extract(j.value,'$.retry_key'),?,?,?
+  const statements=[db.prepare(`INSERT INTO send_requests(id,actor_id,fingerprint,created_at) SELECT ?,?,?,? WHERE ?=1 OR NOT EXISTS(SELECT 1 FROM pickup_items WHERE teacher_id IN(SELECT value FROM json_each(?)) AND status='待領取') ON CONFLICT(id) DO NOTHING`).bind(request,actor.id,fingerprint,now,!pickup||!!pickupItemId||p.duplicate_confirmed===true?1:0,JSON.stringify(ids)),
+   db.prepare(`INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,status,created_at,pickup_name,pickup_item_id)
+   SELECT json_extract(j.value,'$.id'),?,json_extract(j.value,'$.teacher_id'),?,?,?,coalesce(t.binding_version,-1),json_extract(j.value,'$.retry_key'),?,?,?,?
    FROM json_each(?) j LEFT JOIN teachers t ON t.id=json_extract(j.value,'$.teacher_id')
    WHERE NOT EXISTS(SELECT 1 FROM notifications WHERE request_id=? AND teacher_id=json_extract(j.value,'$.teacher_id'))
-   AND EXISTS(SELECT 1 FROM send_requests WHERE id=? AND actor_id=? AND fingerprint=? AND archived_at IS NULL)`).bind(request,kind,content,actor.id,pickup?'待領取':'待回覆',now,pickupName,JSON.stringify(items),request,request,actor.id,fingerprint)];
+   AND EXISTS(SELECT 1 FROM send_requests WHERE id=? AND actor_id=? AND fingerprint=? AND archived_at IS NULL)`).bind(request,kind,content,actor.id,pickup?'待領取':'待回覆',now,pickupName,pickupItemId,JSON.stringify(items),request,request,actor.id,fingerprint)];
   await db.batch(statements);
   const req=await db.prepare('SELECT * FROM send_requests WHERE id=?').bind(request).first<any>();if(!req)throw new HttpError(409,'教師已有待領取紀錄，請確認是否為新件或仍需再次通知','DUPLICATE_NOTICE');if(req.archived_at)throw new HttpError(409,'此發送請求的舊紀錄已清理，不能再次發送','RECORDS_CLEANED');if(req.fingerprint!==fingerprint||req.actor_id!==actor.id)throw new HttpError(409,'重複請求內容不一致');
   const notices=await rows<{id:string}>(db.prepare('SELECT id FROM notifications WHERE request_id=? ORDER BY teacher_id').bind(request));
   for(const n of notices.slice(0,5))await dispatch(env,actor,n.id,reply);
-  const results=await rows(db.prepare('SELECT id,send_status,error_code FROM notifications WHERE request_id=? ORDER BY teacher_id').bind(request));
+  const results=await rows(db.prepare('SELECT id,pickup_item_id,send_status,error_code FROM notifications WHERE request_id=? ORDER BY teacher_id').bind(request));
   return {data:notices.map(n=>n.id),results};
  }
  if(action==='dispatch'){await dispatch(env,actor,id(p.id));return {};}
@@ -105,9 +121,10 @@ async function handover(env:Env,actor:Actor,action:string,p:any){
  const db=env.DB,hid=id(p.id),now=iso(),operation=crypto.randomUUID();
  const before=await db.prepare('SELECT * FROM handovers WHERE id=?').bind(hid).first<any>();
  if(action==='handover_create'){
-  const content=text(p.content,'交接內容',2000),name=text(p.handover_name,'交接人',80);
-  if(before){if(before.content!==content||before.created_by!==actor.id||before.handover_name!==name)throw new HttpError(409,'重複請求內容不一致');return {data:before};}
-  await db.batch([db.prepare('INSERT INTO handovers(id,content,created_by,creator_name,handover_name,created_at,operation_token) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(hid,content,actor.id,actor.display_name,name,now,operation),revision(db,actor,hid,action,null,operation,null),handoverAudit(db,actor,action,hid,operation)]);
+  const content=text(p.content,'交接內容',2000),name=text(p.handover_name,'交接人',80),teacherId=p.teacher_id?id(p.teacher_id):null;
+  if(teacherId&&!await db.prepare('SELECT id FROM teachers WHERE id=?').bind(teacherId).first())throw new HttpError(404,'找不到教師');
+  if(before){if(before.content!==content||before.created_by!==actor.id||before.handover_name!==name||(before.teacher_id||null)!==teacherId)throw new HttpError(409,'重複請求內容不一致');return {data:before};}
+  await db.batch([db.prepare('INSERT INTO handovers(id,content,created_by,creator_name,handover_name,created_at,operation_token,teacher_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING').bind(hid,content,actor.id,actor.display_name,name,now,operation,teacherId),revision(db,actor,hid,action,null,operation,null),handoverAudit(db,actor,action,hid,operation)]);
  }else{
   if(!before)throw new HttpError(404,'交接事項不存在');
   if((action==='handover_complete'&&before.completed_at)||(action==='handover_reopen'&&!before.completed_at))return {data:before};
@@ -124,6 +141,6 @@ async function handover(env:Env,actor:Actor,action:string,p:any){
  if(after.operation_token!==operation)throw new HttpError(409,'交接事項已被更新，請重新整理後再操作');return {data:after,...(action==='handover_complete'?{undo:undoInfo(operation)}:{})};
 }
 function revision(db:D1Database,actor:Actor,hid:string,action:string,before:any,operation:string,reason:string|null){
- return db.prepare(`INSERT INTO handover_revisions(id,handover_id,action,actor_id,actor_name,before_data,after_data,reason,created_at,json_version) SELECT ?,id,?,?,?, ?,json_object('id',id,'content',content,'created_by',created_by,'creator_name',creator_name,'handover_name',handover_name,'created_at',created_at,'completed_at',completed_at,'completed_by',completed_by,'completed_name',completed_name,'finisher_name',finisher_name,'version',version),?,?,version FROM handovers WHERE id=? AND operation_token=?`).bind(operation,action,actor.id,actor.display_name,before?JSON.stringify(before):null,reason,iso(),hid,operation);
+ return db.prepare(`INSERT INTO handover_revisions(id,handover_id,action,actor_id,actor_name,before_data,after_data,reason,created_at,json_version) SELECT ?,id,?,?,?, ?,json_object('id',id,'content',content,'created_by',created_by,'creator_name',creator_name,'handover_name',handover_name,'created_at',created_at,'completed_at',completed_at,'completed_by',completed_by,'completed_name',completed_name,'finisher_name',finisher_name,'version',version,'teacher_id',teacher_id),?,?,version FROM handovers WHERE id=? AND operation_token=?`).bind(operation,action,actor.id,actor.display_name,before?JSON.stringify(before):null,reason,iso(),hid,operation);
 }
 function handoverAudit(db:D1Database,actor:Actor,action:string,hid:string,operation:string){return db.prepare(`INSERT INTO audit_logs(id,actor_id,action,handover_id,created_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM handover_revisions WHERE id=?)`).bind(crypto.randomUUID(),actor.id,action,hid,iso(),operation);}

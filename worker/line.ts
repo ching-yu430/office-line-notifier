@@ -12,6 +12,7 @@ export async function dispatch(env:Env,actor:Actor,nid:string,reply?:ReplyComple
  // UPDATE RETURNING 原子領取，只有一個請求能呼叫 LINE。
  const n=await env.DB.prepare(`UPDATE notifications SET send_status='sending',claimed_at=? WHERE id=? AND send_status='queued' RETURNING *`).bind(iso(),nid).first<any>();
  if(!n)return;
+ if(n.pickup_item_id){const item=await env.DB.prepare('SELECT status FROM pickup_items WHERE id=?').bind(n.pickup_item_id).first<any>();if(item?.status!=='待領取'){await env.DB.prepare("UPDATE notifications SET send_status='failed',error_code='item_closed' WHERE id=? AND send_status='sending'").bind(nid).run();return;}}
  const teacher=await env.DB.prepare('SELECT line_user_id,binding_version,active FROM teachers WHERE id=?').bind(n.teacher_id).first<any>();
  if(!teacher?.active||!teacher.line_user_id||teacher.binding_version!==n.binding_version){await env.DB.prepare("UPDATE notifications SET send_status='failed',error_code='binding_changed' WHERE id=? AND send_status='sending'").bind(nid).run();return;}
  let outcome='uncertain',error:string|null='network_or_timeout';

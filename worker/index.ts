@@ -7,6 +7,7 @@ import{recover}from'./line';
 import{operationalFailure}from'./errors';
 import{APP_VERSION}from'../src/version';
 import{notificationHistory}from'./notification-history';
+import {pickupFields} from './pickup-items';
 const securityHeaders={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 export default {
  async fetch(req:Request,env:Env):Promise<Response>{
@@ -54,10 +55,19 @@ export default {
    if(path==='/api/conversation'&&req.method==='GET'){
     const tid=url.searchParams.get('teacher_id');if(!tid||!/^[a-zA-Z0-9_-]{1,80}$/.test(tid))throw new HttpError(400,'教師識別碼格式錯誤');
     if(!await env.DB.prepare('SELECT id FROM teachers WHERE id=?').bind(tid).first())throw new HttpError(404,'找不到教師');
+    const cursorText=url.searchParams.get('before'), knownText=url.searchParams.get('known_from');
+    const parseSequence=(value:string|null)=>{if(value===null)return null;if(!/^[1-9]\d{0,14}$/.test(value)||!Number.isSafeInteger(Number(value)))throw new HttpError(400,'訊息分頁格式錯誤');return Number(value);};
+    const cursor=parseSequence(cursorText),known=parseSequence(knownText);
+    const messageSql=`SELECT m.id,m.teacher_id,m.direction,m.content,m.message_type,m.created_at,m.notification_id,m.withdrawn,m.sequence,a.display_name AS sender_name
+      FROM (SELECT rowid AS sequence,* FROM messages WHERE teacher_id=? ${cursor?'AND rowid<?':''} ORDER BY rowid DESC LIMIT 201) m
+      LEFT JOIN notifications n ON n.id=m.notification_id LEFT JOIN admins a ON a.id=n.sender_id ORDER BY m.sequence DESC`;
     const results=await env.DB.batch([
-     env.DB.prepare(`SELECT m.id,m.teacher_id,m.direction,m.content,m.message_type,m.created_at,m.notification_id,m.withdrawn,m.sequence,a.display_name AS sender_name FROM (SELECT rowid AS sequence,* FROM messages WHERE teacher_id=? ORDER BY rowid DESC LIMIT 200) m LEFT JOIN notifications n ON n.id=m.notification_id LEFT JOIN admins a ON a.id=n.sender_id ORDER BY m.created_at,m.sequence`).bind(tid),
-     env.DB.prepare("SELECT id,teacher_id,kind,pickup_name,content,send_status,status,created_at,completed_at,completed_by,version FROM notifications WHERE teacher_id=? AND (kind IN ('mail','parcel') OR pickup_name IS NOT NULL) AND status='待領取' ORDER BY created_at DESC LIMIT 200").bind(tid)
-    ]);return json({messages:results[0].results,pickups:results[1].results});
+     env.DB.prepare(messageSql).bind(tid,...(cursor?[cursor]:[])),
+     env.DB.prepare('SELECT '+pickupFields+" FROM pickup_items p WHERE p.teacher_id=? AND p.status='待領取' ORDER BY p.created_at DESC LIMIT 200").bind(tid),
+     env.DB.prepare('SELECT id FROM messages WHERE teacher_id=? AND withdrawn=1 AND rowid>=?').bind(tid,known||Number.MAX_SAFE_INTEGER)
+    ]);
+    const all=results[0].results as any[],messages=all.slice(0,200).reverse();
+    return json({messages,pickups:results[1].results,has_more:all.length>200,next_before:messages[0]?.sequence??null,withdrawn_ids:results[2].results.map((row:any)=>row.id)});
    }
    // 高頻檢查只讀一列版本；不查聊天歷史、不清理資料、不呼叫 LINE。
    if(path==='/api/changes'&&req.method==='GET'){
@@ -68,21 +78,21 @@ export default {
    }
    if(path==='/api/data'&&req.method==='GET'){
     await recover(env.DB);
-    await env.DB.batch([env.DB.prepare('DELETE FROM reply_presence WHERE expires_at<=?').bind(unix()),env.DB.prepare('DELETE FROM undo_actions WHERE expires_at<?').bind(unix()-86400)]);
+    await env.DB.batch([env.DB.prepare('DELETE FROM reply_presence WHERE expires_at<=?').bind(unix()),env.DB.prepare('DELETE FROM undo_actions WHERE expires_at<?').bind(unix()-86400),env.DB.prepare('DELETE FROM pickup_item_undo WHERE expires_at<?').bind(unix()-600)]);
     const version=(await env.DB.prepare('SELECT version FROM system_meta WHERE id=1').first<{version:number}>())!.version;
     const etag=`"${s.id}-${s.role}-${version}"`;headers.set('ETag',etag);
     if(req.headers.get('if-none-match')===etag)return new Response(null,{status:304,headers});
-    const names=['teachers','notifications','messages','staff','templates','audit_logs','conversations','handovers','internal_notes','handover_revisions','inbox','presence'];
+    const names=['teachers','notifications','messages','staff','templates','audit_logs','conversations','handovers','internal_notes','handover_revisions','inbox','presence','pickup_items','summary'];
     // 不向瀏覽器暴露 LINE User ID、密碼雜湊、Session、綁定碼雜湊。
     const queries=[
      'SELECT id,name,department,notes,active,bound_at,last_notified_at,conversation_version FROM teachers ORDER BY name LIMIT 1000',
-     'SELECT id,teacher_id,kind,pickup_name,content,important,sender_id,send_status,status,error_code,created_at,sent_at,completed_at,completed_by,version FROM notifications ORDER BY created_at DESC LIMIT 500',
+     'SELECT id,teacher_id,kind,pickup_name,pickup_item_id,content,important,sender_id,send_status,status,error_code,created_at,sent_at,completed_at,completed_by,version FROM notifications ORDER BY created_at DESC LIMIT 500',
      'SELECT id,teacher_id,direction,content,message_type,created_at,line_event_id,line_message_id,notification_id,withdrawn,processing_status,sequence FROM (SELECT rowid AS sequence,* FROM messages ORDER BY rowid DESC LIMIT 500) ORDER BY created_at,sequence',
      s.role==='admin'?'SELECT id,username,display_name,role,active FROM admins ORDER BY created_at':'SELECT id,display_name,role,active FROM admins ORDER BY created_at',
      'SELECT * FROM templates',
      s.role==='admin'?'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500':'SELECT * FROM audit_logs WHERE 0',
      'SELECT * FROM conversations',
-     'SELECT id,content,created_by,creator_name,handover_name,created_at,completed_at,completed_by,completed_name,finisher_name,version FROM handovers ORDER BY completed_at IS NOT NULL,created_at DESC LIMIT 1000',
+     'SELECT id,content,created_by,creator_name,handover_name,created_at,completed_at,completed_by,completed_name,finisher_name,version,teacher_id FROM handovers WHERE completed_at IS NULL OR id IN(SELECT id FROM handovers WHERE completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 200) ORDER BY completed_at IS NOT NULL,created_at DESC',
      'SELECT * FROM internal_notes ORDER BY created_at DESC LIMIT 500',
      'SELECT id,handover_id,action,actor_id,actor_name,before_data,after_data,reason,created_at FROM handover_revisions ORDER BY created_at DESC LIMIT 500',
      `SELECT t.id AS teacher_id,m.content AS latest_content,m.created_at AS latest_at,m.direction AS latest_direction,
@@ -90,11 +100,19 @@ export default {
        (SELECT count(*) FROM messages WHERE teacher_id=t.id AND direction='in' AND withdrawn=0 AND rowid>coalesce(v.last_seen_seq,0)) AS unread_count
       FROM teachers t LEFT JOIN messages m ON m.rowid=(SELECT max(rowid) FROM messages WHERE teacher_id=t.id)
       LEFT JOIN conversation_views v ON v.teacher_id=t.id AND v.admin_id=? WHERE t.active=1`,
-     `SELECT p.teacher_id,p.admin_id,a.display_name,p.expires_at FROM reply_presence p JOIN admins a ON a.id=p.admin_id WHERE a.active=1 AND p.expires_at>?`
+     `SELECT p.teacher_id,p.admin_id,a.display_name,p.expires_at FROM reply_presence p JOIN admins a ON a.id=p.admin_id WHERE a.active=1 AND p.expires_at>?`,
+     'SELECT '+pickupFields+" FROM pickup_items p WHERE p.status='待領取' ORDER BY p.created_at DESC LIMIT 200",
+     `SELECT (SELECT count(*) FROM pickup_items WHERE status='待領取') AS pickup_count,
+       (SELECT count(*) FROM handovers WHERE completed_at IS NULL) AS handover_count,
+       (SELECT count(*) FROM notifications WHERE send_status IN ('failed','uncertain') AND status!='已完成') AS attention_count,
+       (SELECT count(*) FROM notifications WHERE send_status='accepted' AND sent_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','+8 hours','start of day','-8 hours')) AS sent_today,
+       (SELECT count(*) FROM pickup_items WHERE status='已完成' AND completed_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','+8 hours','start of day','-8 hours')) AS picked_today,
+       (SELECT count(*) FROM handovers WHERE completed_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','+8 hours','start of day','-8 hours')) AS handovers_today`
 
     ];
     const results=await env.DB.batch(queries.map((q,i)=>i===10?env.DB.prepare(q).bind(s.id):i===11?env.DB.prepare(q).bind(unix()):env.DB.prepare(q)));
     const data=Object.fromEntries(names.map((name,i)=>[name,results[i].results]));
+    data.summary=(data.summary as any[])[0];
     for(const name of ['teachers','staff'])for(const row of data[name]as any[])row.active=!!row.active;
     for(const row of data.handover_revisions as any[]){row.before_data=row.before_data?JSON.parse(row.before_data):null;row.after_data=JSON.parse(row.after_data);}
     return json(data);
@@ -109,6 +127,8 @@ export default {
    // 不輸出 SQL、參數、密碼或 LINE 原始錯誤內容。
    const message=e instanceof Error?e.message:'';
    if(message.includes('last_admin'))return json({error:'必須保留至少一位啟用中的管理員'},409);
+   if(message.includes('pickup_notice_pending'))return json({error:'此物品仍有待發送或結果未明的通知，請先核對紀錄'},409);
+   if(message.includes('invalid_pickup_item'))return json({error:'物品已更新或不再待領取'},409);
    if(message.includes('invalid_binding'))return json({error:'教師尚未綁定、已停用或綁定已變更'},409);
    if(message.includes('UNIQUE constraint'))return json({error:'帳號或資料已存在，請重新確認'},409);
    const operational=operationalFailure(e);if(operational)return json({error:operational.message,code:operational.code},503);

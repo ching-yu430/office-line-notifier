@@ -1,6 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import {openPickups,openNotes,expectConversationStatus,chooseConversationStatus} from './chat-tools';
-async function chat(page:Page,name='示範教師甲'){await page.getByRole('button',{name:/^訊息中心/}).click();if(await page.getByRole('button',{name:'返回教師列表'}).isVisible())await page.getByRole('button',{name:'返回教師列表'}).click();await page.locator('.chat-teacher').filter({hasText:name}).click();}
+async function chat(page:Page,name='示範教師甲'){await page.getByRole('button',{name:/^訊息中心/}).click();if(await page.getByRole('button',{name:'返回教師列表'}).isVisible())await page.getByRole('button',{name:'返回教師列表'}).click();await page.getByRole('button',{name:'全部對話',exact:true}).click();await page.locator('.chat-teacher').filter({hasText:name}).click();}
 
 test('訊息中心預設只顯示對話，領件與備註按需切換，常用回覆折疊',async({page},info)=>{
  await page.setViewportSize({width:1440,height:1000});await page.goto('/');await chat(page);await expect(page.locator('.conversation-tools')).toHaveCount(0);await expect(page.locator('.reply-shortcuts')).toHaveCount(0);await expect(page.locator('.chat-list-hint')).toHaveCount(0);await expect(page.locator('.messages')).not.toContainText('已送出');await expect(page.getByLabel('回覆老師',{exact:true})).toBeVisible();
@@ -27,5 +27,5 @@ test('手機保持聊天空間，輔助面板可關閉，新增物品預選正�
 test('可直接看見與切換對話狀態，重複點同一狀態不新增操作，教師彼此獨立',async({page})=>{
  await page.goto('/');await chat(page);await expect(page.getByRole('combobox',{name:'對話處理狀態'})).toHaveCount(0);await expectConversationStatus(page,'待回覆');await chooseConversationStatus(page,'已完成');await expectConversationStatus(page,'已完成');
  const audits=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('office-line-demo-v1')!).audit_logs.filter((a:any)=>a.action==='conversation_status').length);const count=await audits();await chooseConversationStatus(page,'已完成');expect(await audits()).toBe(count);
- await page.locator('.chat-teacher').filter({hasText:'示範教師丙'}).click();await chooseConversationStatus(page,'待回覆');await expectConversationStatus(page,'待回覆');await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();await expectConversationStatus(page,'已完成');
+ await page.getByRole('button',{name:'全部對話',exact:true}).click();await page.locator('.chat-teacher').filter({hasText:'示範教師丙'}).click();await chooseConversationStatus(page,'待回覆');await expectConversationStatus(page,'待回覆');await page.locator('.chat-teacher').filter({hasText:'示範教師甲'}).click();await expectConversationStatus(page,'已完成');
 });

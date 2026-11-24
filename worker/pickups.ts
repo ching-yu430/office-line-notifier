@@ -10,7 +10,7 @@ export async function pickupCommand(env:Env,actor:Actor,action:string,p:any){
  if(action==='notification_preflight'){
   if(!Array.isArray(p.teacher_ids)||p.teacher_ids.length<1||p.teacher_ids.length>100)throw new HttpError(400,'每批限 1 至 100 位教師');
   const ids=[...new Set(p.teacher_ids.map(id))];
-  const pending=await rows(db.prepare(`SELECT n.teacher_id,t.name,count(*) AS count FROM notifications n JOIN teachers t ON t.id=n.teacher_id WHERE n.teacher_id IN (SELECT value FROM json_each(?)) AND (n.kind IN ('mail','parcel') OR n.pickup_name IS NOT NULL) AND n.status='待領取' GROUP BY n.teacher_id`).bind(JSON.stringify(ids)));
+  const pending=await rows(db.prepare(`SELECT n.teacher_id,t.name,count(*) AS count FROM pickup_items n JOIN teachers t ON t.id=n.teacher_id WHERE n.teacher_id IN (SELECT value FROM json_each(?)) AND n.status='待領取' GROUP BY n.teacher_id`).bind(JSON.stringify(ids)));
   return {pending};
  }
  const request=id(p.request_id),isUndo=action==='undo_many';
@@ -38,7 +38,7 @@ export async function pickupCommand(env:Env,actor:Actor,action:string,p:any){
  if(isUndo&&entries.some(e=>e.used_at||e.expires_at<=unix()||e.after_version!==e.version||e.operation_token!==e.id))throw new HttpError(409,'紀錄已更新、逾期或已復原，請查看最新紀錄');
  for(const e of entries)e.op=await sha256(request+':'+(isUndo?e.target_id:e.id));
  const json=JSON.stringify(entries),expiry=unix()+60;
- const valid=isUndo?`SELECT count(*) FROM json_each(?) j JOIN undo_actions u ON u.id=json_extract(j.value,'$.id') JOIN notifications n ON n.id=u.target_id WHERE u.actor_id=? AND u.used_at IS NULL AND u.expires_at>? AND u.target_type='notification' AND n.version=u.after_version AND n.operation_token=u.id`:`SELECT count(*) FROM json_each(?) j JOIN notifications n ON n.id=json_extract(j.value,'$.id') WHERE n.teacher_id=? AND (n.kind IN ('mail','parcel') OR n.pickup_name IS NOT NULL) AND n.status='待領取' AND n.version=json_extract(j.value,'$.version')`;
+ const valid=isUndo?`SELECT count(*) FROM json_each(?) j JOIN undo_actions u ON u.id=json_extract(j.value,'$.id') JOIN notifications n ON n.id=u.target_id WHERE u.actor_id=? AND u.used_at IS NULL AND u.expires_at>? AND u.target_type='notification' AND n.version=u.after_version AND n.operation_token=u.id`:`SELECT count(*) FROM json_each(?) j JOIN notifications n ON n.id=json_extract(j.value,'$.id') WHERE n.teacher_id=? AND n.status='待領取' AND n.version=json_extract(j.value,'$.version')`;
  const args=isUndo?[json,actor.id,unix()]:[json,teacherId];
  const ledger=db.prepare(`INSERT INTO send_requests(id,actor_id,fingerprint,created_at) SELECT ?,?,?,? WHERE (${valid})=? ON CONFLICT(id) DO NOTHING`).bind(request,actor.id,fingerprint,now,...args,entries.length);
  const gate=`EXISTS(SELECT 1 FROM send_requests WHERE id=? AND actor_id=? AND fingerprint=?)`;

@@ -2,7 +2,7 @@ import type {Data} from './api';
 import {backupFields,backupRow,backupTables,type BackupRows,type BackupTable} from './backup-format';
 type Job={actor:string;rows:BackupRows;stamp:string;created_at:string;expires_at:number;done?:string};
 const jobs=new Map<string,Job>();
-const collect=(d:Data)=>Object.fromEntries(backupTables.map(table=>[table,(d[table] as any[]).map(row=>backupRow(table,row)).sort((a,b)=>String(a[backupFields[table][0]])<String(b[backupFields[table][0]])?-1:String(a[backupFields[table][0]])>String(b[backupFields[table][0]])?1:0)])) as BackupRows;
+const collect=(d:Data)=>Object.fromEntries(backupTables.map(table=>[table,(d[table] as any[]||[]).map(row=>backupRow(table,row)).sort((a,b)=>String(a[backupFields[table][0]])<String(b[backupFields[table][0]])?-1:String(a[backupFields[table][0]])>String(b[backupFields[table][0]])?1:0)])) as BackupRows;
 export function mockBackup(action:string,p:any,d:Data,actor:string){
  if(!action.startsWith('records_backup_'))return undefined;
  if(action==='records_backup_start'){

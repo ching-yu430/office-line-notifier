@@ -1,168 +1,550 @@
 {
-  "version": "2026.11.19.2",
-  "base_commit": "0681ce8",
-  "source_commit": "0d4f98e0a1368f94935416e828e5af50a5c71bad",
-  "contains_previous_updates": [
-    "2026.11.17.3",
-    "2026.11.18.1",
-    "2026.11.18.2",
-    "2026.11.18.3",
-    "2026.11.18.4",
-    "2026.11.18.5",
-    "2026.11.19.1"
-  ],
-  "update": {
-    "file": "office-line-notifier-combined-update.zip",
-    "bytes": 242825,
-    "sha256": "7a56a9b26b4f8e1aba57f2b0d3bf92cdd092c4a1d973adbb6d4f9cac12f9c334",
-    "files": [
-      "README.md",
-      "docs/ARCHITECTURE.md",
-      "docs/BINDING-DESK-UPDATE.md",
-      "docs/CONVERSATION-UPDATE.md",
-      "docs/FAILED-NOTICE-CLEANUP-FIX.md",
-      "docs/OPERATIONS.md",
-      "docs/RECORD-BACKUP.md",
-      "docs/RECORD-CLEANUP.md",
-      "docs/SECURITY-REVIEW-2026-11-18.md",
-      "docs/TEST-REPORT.md",
-      "migrations/0003_pickup_items.sql",
-      "migrations/0004_record_cleanup.sql",
-      "migrations/0005_record_exports.sql",
-      "package-lock.json",
-      "package.json",
-      "scripts/admin-password.mjs",
-      "scripts/build-preview.mjs",
-      "src/BatchPickup.tsx",
-      "src/BindingCard.tsx",
-      "src/ConversationStatus.tsx",
-      "src/DuplicateWarning.tsx",
-      "src/HandoverList.tsx",
-      "src/MessageCenter.tsx",
-      "src/NoticeIcon.tsx",
-      "src/NotificationComposer.tsx",
-      "src/NotificationHistory.tsx",
-      "src/QuickNotice.tsx",
-      "src/RecordBackup.tsx",
-      "src/RecordCleanup.tsx",
-      "src/RecordHistory.tsx",
-      "src/SettingsPanel.tsx",
-      "src/SystemSettings.tsx",
-      "src/api.ts",
-      "src/backup-format.ts",
-      "src/backup-preference.ts",
-      "src/cleanup.ts",
-      "src/main.tsx",
-      "src/mock-backup.ts",
-      "src/mock-cleanup.ts",
-      "src/notice.ts",
-      "src/page-memory.ts",
-      "src/polling.ts",
-      "src/record-backup.ts",
-      "src/refinements.css",
-      "src/use-record-backup.ts",
-      "src/version.ts",
-      "src/workflow.ts",
-      "tests/api-cache.test.ts",
-      "tests/backup.test.ts",
-      "tests/cleanup-options.test.ts",
-      "tests/e2e/binding-desk.spec.ts",
-      "tests/e2e/chat-tools.ts",
-      "tests/e2e/cloudflare.spec.ts",
-      "tests/e2e/conversation-cleanup.spec.ts",
-      "tests/e2e/html-preview.spec.ts",
-      "tests/e2e/record-cleanup.spec.ts",
-      "tests/e2e/refinements.spec.ts",
-      "tests/e2e/settings-backup.spec.ts",
-      "tests/e2e/settings-tools.ts",
-      "tests/e2e/usability.spec.ts",
-      "tests/e2e/workflow.spec.ts",
-      "tests/migration-upgrade.test.ts",
-      "tests/polling.test.ts",
-      "tests/worker.test.ts",
-      "vite.config.ts",
-      "worker/auth.ts",
-      "worker/binding-link.ts",
-      "worker/commands.ts",
-      "worker/handover-history.ts",
-      "worker/index.ts",
-      "worker/notification-history.ts",
-      "worker/pickups.ts",
-      "worker/record-backup.ts",
-      "worker/record-cleanup.ts",
-      "worker/security.ts",
-      "worker/workflow.ts"
-    ]
-  },
-  "hotfix": {
-    "base_commit": "f2f8be238c59f583d6115212034e45d8aeeab571",
-    "base_version": "2026.11.19.1",
-    "migrations": [],
-    "file": "office-line-notifier-failed-cleanup-fix.zip",
-    "bytes": 121622,
-    "sha256": "d4ac894f3ad79ffe9ba2867cd469f8fee62f898f91b2d0c72568d53fe3b92fa6",
-    "files": [
-      "docs/ARCHITECTURE.md",
-      "docs/CONVERSATION-UPDATE.md",
-      "docs/FAILED-NOTICE-CLEANUP-FIX.md",
-      "docs/OPERATIONS.md",
-      "docs/RECORD-BACKUP.md",
-      "docs/RECORD-CLEANUP.md",
-      "docs/TEST-REPORT.md",
-      "src/NotificationHistory.tsx",
-      "src/RecordCleanup.tsx",
-      "src/api.ts",
-      "src/cleanup.ts",
-      "src/main.tsx",
-      "src/mock-cleanup.ts",
-      "src/notice.ts",
-      "src/refinements.css",
-      "src/version.ts",
-      "src/workflow.ts",
-      "tests/cleanup-options.test.ts",
-      "tests/e2e/cloudflare.spec.ts",
-      "tests/e2e/html-preview.spec.ts",
-      "tests/e2e/record-cleanup.spec.ts",
-      "tests/worker.test.ts",
-      "worker/notification-history.ts",
-      "worker/record-cleanup.ts"
-    ]
-  },
-  "html_preview": {
-    "file": "office-line-notifier-html-preview.zip",
-    "bytes": 697582,
-    "sha256": "b7d1182b6d1a25ab6090ad93686cb2a4f9a2eb370ad4dbee1c22794a5c253980",
-    "files": [
-      "office-line-notifier-preview.html"
-    ]
-  },
-  "html": {
-    "file": "office-line-notifier-preview.html",
-    "bytes": 1241812,
-    "sha256": "e152edf8aeaa206fc1087b249d55a0af7f9c012d76a5dbe55e79587bfdf7acb0"
-  },
-  "tests": {
-    "unit_integration": 110,
-    "browser_verified_scenarios": 57,
-    "initial_browser_run": {
-      "passed": 56,
-      "fixture_failed": 1
+  "version": "2026.11.24.1",
+  "source_commit": "5c1424bf6c93b84d795533908916851c09b7d611",
+  "target_repository": "npust-lc/office-line-notifier",
+  "target_main": "5c124076faa0c2bfc02ef06ffc6aba8b5faa1874",
+  "required_new_migration": "0006_office_workflows.sql",
+  "configuration_files_included": false,
+  "original_logo_sha256": "2f9650432c72b7be78515e4340c28d73ca0061d4bc37f4b3c0c17be56a473b3b",
+  "packages": [
+    {
+      "name": "office-line-notifier-combined-update.zip",
+      "bytes": 270729,
+      "sha256": "ea3e57fc388eecfcf29be1ca43c4c5e0ed49cd543a3fb2f56becee3313ddda2e",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "0c6d767a34657894712268b98c3e4d2c38d0b78952ed67229f656c39cad81c25"
+        },
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "sha256": "48e8207d65ee574219b1b0d09cf1547b25da9143e1a2101ff3c8debcebcf7082"
+        },
+        {
+          "path": "docs/BINDING-DESK-UPDATE.md",
+          "sha256": "ed0e5e0afa668bacf1041305560d22376aa7314866b3a177bab655bfe73da095"
+        },
+        {
+          "path": "docs/CONVERSATION-UPDATE.md",
+          "sha256": "a676244ec1c69c9dc7784abce46c492e2c672821fb32057312a76163070cf1fb"
+        },
+        {
+          "path": "docs/FAILED-NOTICE-CLEANUP-FIX.md",
+          "sha256": "0d266196c027c02f0b371a537ee2661a68e63770a48ed28bd82a034a5a77f374"
+        },
+        {
+          "path": "docs/OFFICE-WORKFLOWS-UPDATE.md",
+          "sha256": "d9a639dc6b2b25205585d321b545c42397e38b544a48457b47635ba585c55a3e"
+        },
+        {
+          "path": "docs/OPERATIONS.md",
+          "sha256": "eac17c1c433ef13a5f7e581d5f98cc1dc101efbb0b9bdf8ce1ab20d9fe8a5436"
+        },
+        {
+          "path": "docs/RECORD-BACKUP.md",
+          "sha256": "9f5287574f54bb9de0148e0cc0d7d59083614dd69446868e08dc09db8df74695"
+        },
+        {
+          "path": "docs/RECORD-CLEANUP.md",
+          "sha256": "282971f539ded3822838c86a89a9b2950a3a1f32ded85ae5e64dd9378bad3351"
+        },
+        {
+          "path": "docs/SECURITY-REVIEW-2026-11-18.md",
+          "sha256": "583e5c5b142ed369461ea77f88df0c9822950157b83d1c86bf04a659ba7aea0e"
+        },
+        {
+          "path": "docs/TEST-REPORT.md",
+          "sha256": "63fe8a3f6cf120b808875224467e5836b738fa31f4586ca04be289c309d97859"
+        },
+        {
+          "path": "migrations/0003_pickup_items.sql",
+          "sha256": "b0d5a5357b3b0d3d312a98cd4517b14a2d7b89e9048a12ceb4e9fc13fc99c4ed"
+        },
+        {
+          "path": "migrations/0004_record_cleanup.sql",
+          "sha256": "c555293a80474c9dd8bbbb9cf0b0de31e0ce9c1feebeaeed6653f016bb636474"
+        },
+        {
+          "path": "migrations/0005_record_exports.sql",
+          "sha256": "3f613e458264cd8623182acca212d023d7c1b8441d5da6445ea6c690441ebd58"
+        },
+        {
+          "path": "migrations/0006_office_workflows.sql",
+          "sha256": "7046083db47897028a3e95cea89dfb220b1363212dcb90b2b9c4cd9b720a3722"
+        },
+        {
+          "path": "package-lock.json",
+          "sha256": "a6a9e6c469142a70203c9aa6004e565a3353e7aa4bff91d72d551ee5a4c98519"
+        },
+        {
+          "path": "package.json",
+          "sha256": "795b97db8d0dbc636f1a46b33488d04a78ac697eff5b7747dacac778056bf0d1"
+        },
+        {
+          "path": "scripts/admin-password.mjs",
+          "sha256": "e75f89bcf505d2e3de875f530dab5193e613ef2c94b95e59084f27e3090808fa"
+        },
+        {
+          "path": "scripts/build-preview.mjs",
+          "sha256": "bf6598d9f2f8c9fe8005d2d14a7b22ca214bb73150025618ccc30af2c71c0844"
+        },
+        {
+          "path": "src/BatchPickup.tsx",
+          "sha256": "0d9fa607d1732cef01720e5a4a9a814137fe29d0f7e7d3c9191bedbfe99f685f"
+        },
+        {
+          "path": "src/BindingCard.tsx",
+          "sha256": "a04720d26dc7c4d7f5abde7f330ab6be511613e661e8e423be9a5cbc89cd453a"
+        },
+        {
+          "path": "src/ConversationStatus.tsx",
+          "sha256": "e3dd6400e97479462a4bf5c3757abcdb600c48acd96ea3e30c3fe96cc668c608"
+        },
+        {
+          "path": "src/DuplicateWarning.tsx",
+          "sha256": "faad4ce84b8097dcfb37bae32a681501153165504d836aaf2c4fa7c773663d60"
+        },
+        {
+          "path": "src/HandoverList.tsx",
+          "sha256": "63411d626ffa1426820672c1d19598c44e9e2abd1e8e856d302da7794571332c"
+        },
+        {
+          "path": "src/HandoverRevisions.tsx",
+          "sha256": "895aada31d2242f0b15a726997161266d755306db1a6649dadb51325a2c81229"
+        },
+        {
+          "path": "src/MessageCenter.tsx",
+          "sha256": "bf31f25b1ac91caa99546bcc77b992b260233282e9721cb0de214e1ea6b9ad46"
+        },
+        {
+          "path": "src/NoticeIcon.tsx",
+          "sha256": "4ae64aa3d87fe02495be720b5c43f349e8d8713b57c3a4997a156d46aafa6793"
+        },
+        {
+          "path": "src/NotificationComposer.tsx",
+          "sha256": "eb8c3758f6bcdddd554cb93130d380f7408b7029a78b30a66c93bd98b97fa279"
+        },
+        {
+          "path": "src/NotificationHistory.tsx",
+          "sha256": "fabeb5366d9e57466ac18d86ad24223cdb2af7e7b087b16cceab05070669c51e"
+        },
+        {
+          "path": "src/PickupHistory.tsx",
+          "sha256": "f82f64c6f3f51bb54d0d0465efb049a3b5547cab6cfb31b7bc94477576e67fff"
+        },
+        {
+          "path": "src/QuickNotice.tsx",
+          "sha256": "0c86d3329d90047f4424017432321371b94e016b6f0bdcab4fbdb4b7ae9d33aa"
+        },
+        {
+          "path": "src/RecordBackup.tsx",
+          "sha256": "86aeb8639d15fc3aed2a3f338458987b96f9790a728f87f853894cb2363e86d5"
+        },
+        {
+          "path": "src/RecordCleanup.tsx",
+          "sha256": "ed680515f7010fc950f997b09c61b00b5894b267a0ce866451b9737ac78739b9"
+        },
+        {
+          "path": "src/RecordHistory.tsx",
+          "sha256": "fdc3954f3abdb1b4882ec1f4f90925accb966904ba84902dd035669ae8de7f7c"
+        },
+        {
+          "path": "src/SettingsPanel.tsx",
+          "sha256": "9ee21d2599bd907242bd60676401843fdc0efe33f003e46fa22789370de1db7c"
+        },
+        {
+          "path": "src/SystemSettings.tsx",
+          "sha256": "8ba1c928b04b7b0fd00e0c09f7de17ffa3978fc504dcbb7349f174a69406e3bf"
+        },
+        {
+          "path": "src/api.ts",
+          "sha256": "d8de848260d8447a578c436732bdae15a5e72dbee672cd022ee741ba13c5de2f"
+        },
+        {
+          "path": "src/backup-format.ts",
+          "sha256": "71279c45f838392ae758ff10231d7cbb0e077c9c06bf086c4e89ebcd0389b53e"
+        },
+        {
+          "path": "src/backup-preference.ts",
+          "sha256": "5f9d4ab277254fd6833f37230cef49bcfeb7afb41455726b3440fb8349f9eabc"
+        },
+        {
+          "path": "src/cleanup.ts",
+          "sha256": "c0a63fffef545db7d30f60a88602ebb03b01e44ab18bad093676b941601e8923"
+        },
+        {
+          "path": "src/main.tsx",
+          "sha256": "c1adf0e83341321cb092be4a9a50e9e9ee7352661e6c81c70ad01ee9a85d3abe"
+        },
+        {
+          "path": "src/mock-backup.ts",
+          "sha256": "06855736c941b8d6f092798b79f59fa924e79fe8e6def9fe95f2565c633f427a"
+        },
+        {
+          "path": "src/mock-cleanup.ts",
+          "sha256": "90604d8538f5a520953da94fc6f5414b1b3b19e091944e00269fdfdfb89043fe"
+        },
+        {
+          "path": "src/mock-pickup-items.ts",
+          "sha256": "fb403c94c84f92a16ac55aa8072f47ccb08210a0aba77fda76f939699f66975c"
+        },
+        {
+          "path": "src/notice.ts",
+          "sha256": "edb5cfb5e2a642b50e99cb6d7d98decc0e540dd6f2aaba356c894e205d9ccbfc"
+        },
+        {
+          "path": "src/page-memory.ts",
+          "sha256": "4812f9ad0891ce0338a639ad28a9add233f42550bbc1bae5f82f78c881d43d33"
+        },
+        {
+          "path": "src/polling.ts",
+          "sha256": "913b6f14eccaeedac978fed9e4362d227ef726793f1864f40e5a8e1b0bd73162"
+        },
+        {
+          "path": "src/record-backup.ts",
+          "sha256": "25a4db0837825e23f55128e270144a7a288a1e598ba4ae8ac799f6b4681d540b"
+        },
+        {
+          "path": "src/refinements.css",
+          "sha256": "adae048ac4cda7fb7c478ca91bd20e88eb02640651fb636328795eec91e3743b"
+        },
+        {
+          "path": "src/reply-drafts.ts",
+          "sha256": "b7bee5a21d3e3478c57578dba95ef1480c07debd7983f5f7aa703d8a23d57fd3"
+        },
+        {
+          "path": "src/use-record-backup.ts",
+          "sha256": "a80464540578efb50a8ae90d1aed826113b34e4d2948b11ff267e14caf3aed5d"
+        },
+        {
+          "path": "src/version.ts",
+          "sha256": "1ca71255f3cdd3d4cff220889c62568a361300e55307969c8c6c392a365fb5d9"
+        },
+        {
+          "path": "src/workflow.ts",
+          "sha256": "dce757d20be82a27404e72cf0c896571137f102809a37ac218bdadab8475c59e"
+        },
+        {
+          "path": "tests/api-cache.test.ts",
+          "sha256": "cca02a25c34fbe0e499c2e9312d939874ecd6c95c5460066a05ce2f060fda20b"
+        },
+        {
+          "path": "tests/backup.test.ts",
+          "sha256": "322c87017571b1698a3516a472655b1c53f023e243ee242609a7389afb9758d1"
+        },
+        {
+          "path": "tests/cleanup-options.test.ts",
+          "sha256": "763c77590882bd8c8b851c3faa40f2597f7c3538f25e176a2cd030af7b4eefc3"
+        },
+        {
+          "path": "tests/e2e/binding-desk.spec.ts",
+          "sha256": "a18fa28ede7e0e0a10b85a7324d10bb118da5765b739b5ac9f33c32efb720a32"
+        },
+        {
+          "path": "tests/e2e/chat-tools.ts",
+          "sha256": "2149f5a9fdd6b7689be775eb8de26653d6297365ed262732a10f5f40b569df3d"
+        },
+        {
+          "path": "tests/e2e/cloudflare.spec.ts",
+          "sha256": "37d85a32365805db68b35af60d8b5a491a1393850d2e07eeef292a679d1ffba4"
+        },
+        {
+          "path": "tests/e2e/conversation-cleanup.spec.ts",
+          "sha256": "731ed56a90e6b402fd257bec5e7ff66dd5ebd93f6ebd5b3b73d2f23ece16c168"
+        },
+        {
+          "path": "tests/e2e/html-preview.spec.ts",
+          "sha256": "b78f7cbeb03af1b81e051b5b255f7221e8e3ec100b3d0daabc098b36c017942f"
+        },
+        {
+          "path": "tests/e2e/office-workflows.spec.ts",
+          "sha256": "0e0cc6383ff63071e465fb2e3edcf709b35f8af83107b4e914934b32ca2dc670"
+        },
+        {
+          "path": "tests/e2e/record-cleanup.spec.ts",
+          "sha256": "7ea7b21421fe906716dd61ff44de185fa9ffaf22d4186ebfa8c071bd2ab8a85f"
+        },
+        {
+          "path": "tests/e2e/refinements.spec.ts",
+          "sha256": "21c52d2c00462fccee685259513e08596314c1fa8ce4169248427dabd40473b8"
+        },
+        {
+          "path": "tests/e2e/settings-backup.spec.ts",
+          "sha256": "ce7ea0a00d257b1d3ce9b40e514e894f75bd6e7c92689962c6373a32cb9b1d64"
+        },
+        {
+          "path": "tests/e2e/settings-tools.ts",
+          "sha256": "e467705948cd4bc915fc02de4eeeec6bd924363e100748c82366b183b532ab58"
+        },
+        {
+          "path": "tests/e2e/usability.spec.ts",
+          "sha256": "23bbb38801fdc39dfa18710218f9c1f94ebda58c0d16d25bad9ff1e80792d3d1"
+        },
+        {
+          "path": "tests/e2e/workflow.spec.ts",
+          "sha256": "dd73a5be6b8001f7857f46d07a8eed3fb18f0e40f0c3c2a4ef607b4fc5b6e6c7"
+        },
+        {
+          "path": "tests/migration-upgrade.test.ts",
+          "sha256": "d2d8d6f8d71688f8b6f23685f84761d0c926b2a6fa4acf2937b2caaa440b1323"
+        },
+        {
+          "path": "tests/migrations.ts",
+          "sha256": "27e57c3fecf8198e90a68ff6fa11e7ec7bc355f8ec12b7afc580cb31b0f3bc13"
+        },
+        {
+          "path": "tests/polling.test.ts",
+          "sha256": "f807d36162dc5c246a178da693937fa39ddf33e1e78f36be305e8d30a8111c91"
+        },
+        {
+          "path": "tests/worker.test.ts",
+          "sha256": "c824d4c7780c889817c5b6986d26c7f34d996c8eabfe264d0cd890645c6a5a11"
+        },
+        {
+          "path": "vite.config.ts",
+          "sha256": "2424324b306c275b737dbef3232fd0b706e3f951e32b20f1bc8e00d18b668443"
+        },
+        {
+          "path": "worker/auth.ts",
+          "sha256": "1f7f3741d10b3610884f6cbb165ba6724716a4b5a7fc27583b19409c200087da"
+        },
+        {
+          "path": "worker/binding-link.ts",
+          "sha256": "8f91fd1f9807fb42f364e183fcc2f42ec25c0e0e7793ddc586d5800cec155e08"
+        },
+        {
+          "path": "worker/commands.ts",
+          "sha256": "68cf390f94023fa258cac9cf73d9df2be26a6b2c89bc08e2ac56f788931c7fb4"
+        },
+        {
+          "path": "worker/handover-history.ts",
+          "sha256": "cf9e3441c645a345d4e3c3e6f6408f0cd4af14f6dd0b812c8aaaad9422097a4c"
+        },
+        {
+          "path": "worker/index.ts",
+          "sha256": "68180ff0055cd920b0e3e16cc241c2dd0988fdca7a72d4d158e899272d907a25"
+        },
+        {
+          "path": "worker/line.ts",
+          "sha256": "0645d73a533e78db142c732ce61ba9bd7c80b6733aec978bd0b979b1fc5e2bf8"
+        },
+        {
+          "path": "worker/notification-history.ts",
+          "sha256": "6bff732281dc0943a14911fbf44f72918313e048cda4b96c2d6b2409da4b6346"
+        },
+        {
+          "path": "worker/pickup-items.ts",
+          "sha256": "62a291497199bdfb306af65f2bcf85a019f5116e634aaf986b06a3353eb8b02b"
+        },
+        {
+          "path": "worker/pickups.ts",
+          "sha256": "3715af30a541e56f27415cae4d1b0691bc3d4905e90702fde732b1e2f3e61069"
+        },
+        {
+          "path": "worker/record-backup.ts",
+          "sha256": "ddf5266126e910d8951d54c1b66b2ab424203595aad55b9bef6471a078cf81b8"
+        },
+        {
+          "path": "worker/record-cleanup.ts",
+          "sha256": "0cc884c6f80eab03406bcfae5844d5305e19338aa5d2fe7120480eb09b9fc66c"
+        },
+        {
+          "path": "worker/security.ts",
+          "sha256": "33e8e3393dbdcf1b505988022a1f1bf145e09800d222b2b8d4601cc6d8e5bd50"
+        },
+        {
+          "path": "worker/workflow.ts",
+          "sha256": "6ebf47cf27b8d077c27df3c349426b20eef0531a3c292c64c8e618b30938ede4"
+        }
+      ]
     },
-    "formal_mode_recheck": 9,
-    "cloudflare_build": "passed"
-  },
-  "migrations_required_if_not_applied": [
-    "0003_pickup_items.sql",
-    "0004_record_cleanup.sql",
-    "0005_record_exports.sql"
-  ],
-  "production_deployed": false,
-  "dependency_audit": {
-    "checked_on": "2026-11-18",
-    "dependencies_unchanged": true,
-    "production": 0,
-    "development_high_nodes": 5,
-    "root_advisory": "GHSA-fc5q-39xc-vjpf"
-  },
-  "line_http": "Mock"
+    {
+      "name": "office-line-notifier-workflow-update.zip",
+      "bytes": 176853,
+      "sha256": "3ae7b72f3341947281e336edc1a247d6e1ad55cffdb787d2ee866d71a3b87253",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "0c6d767a34657894712268b98c3e4d2c38d0b78952ed67229f656c39cad81c25"
+        },
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "sha256": "48e8207d65ee574219b1b0d09cf1547b25da9143e1a2101ff3c8debcebcf7082"
+        },
+        {
+          "path": "docs/OFFICE-WORKFLOWS-UPDATE.md",
+          "sha256": "d9a639dc6b2b25205585d321b545c42397e38b544a48457b47635ba585c55a3e"
+        },
+        {
+          "path": "docs/RECORD-BACKUP.md",
+          "sha256": "9f5287574f54bb9de0148e0cc0d7d59083614dd69446868e08dc09db8df74695"
+        },
+        {
+          "path": "docs/TEST-REPORT.md",
+          "sha256": "63fe8a3f6cf120b808875224467e5836b738fa31f4586ca04be289c309d97859"
+        },
+        {
+          "path": "migrations/0006_office_workflows.sql",
+          "sha256": "7046083db47897028a3e95cea89dfb220b1363212dcb90b2b9c4cd9b720a3722"
+        },
+        {
+          "path": "src/BatchPickup.tsx",
+          "sha256": "0d9fa607d1732cef01720e5a4a9a814137fe29d0f7e7d3c9191bedbfe99f685f"
+        },
+        {
+          "path": "src/HandoverList.tsx",
+          "sha256": "63411d626ffa1426820672c1d19598c44e9e2abd1e8e856d302da7794571332c"
+        },
+        {
+          "path": "src/HandoverRevisions.tsx",
+          "sha256": "895aada31d2242f0b15a726997161266d755306db1a6649dadb51325a2c81229"
+        },
+        {
+          "path": "src/MessageCenter.tsx",
+          "sha256": "bf31f25b1ac91caa99546bcc77b992b260233282e9721cb0de214e1ea6b9ad46"
+        },
+        {
+          "path": "src/PickupHistory.tsx",
+          "sha256": "f82f64c6f3f51bb54d0d0465efb049a3b5547cab6cfb31b7bc94477576e67fff"
+        },
+        {
+          "path": "src/QuickNotice.tsx",
+          "sha256": "0c86d3329d90047f4424017432321371b94e016b6f0bdcab4fbdb4b7ae9d33aa"
+        },
+        {
+          "path": "src/RecordCleanup.tsx",
+          "sha256": "ed680515f7010fc950f997b09c61b00b5894b267a0ce866451b9737ac78739b9"
+        },
+        {
+          "path": "src/SystemSettings.tsx",
+          "sha256": "8ba1c928b04b7b0fd00e0c09f7de17ffa3978fc504dcbb7349f174a69406e3bf"
+        },
+        {
+          "path": "src/api.ts",
+          "sha256": "d8de848260d8447a578c436732bdae15a5e72dbee672cd022ee741ba13c5de2f"
+        },
+        {
+          "path": "src/backup-format.ts",
+          "sha256": "71279c45f838392ae758ff10231d7cbb0e077c9c06bf086c4e89ebcd0389b53e"
+        },
+        {
+          "path": "src/cleanup.ts",
+          "sha256": "c0a63fffef545db7d30f60a88602ebb03b01e44ab18bad093676b941601e8923"
+        },
+        {
+          "path": "src/main.tsx",
+          "sha256": "c1adf0e83341321cb092be4a9a50e9e9ee7352661e6c81c70ad01ee9a85d3abe"
+        },
+        {
+          "path": "src/mock-backup.ts",
+          "sha256": "06855736c941b8d6f092798b79f59fa924e79fe8e6def9fe95f2565c633f427a"
+        },
+        {
+          "path": "src/mock-cleanup.ts",
+          "sha256": "90604d8538f5a520953da94fc6f5414b1b3b19e091944e00269fdfdfb89043fe"
+        },
+        {
+          "path": "src/mock-pickup-items.ts",
+          "sha256": "fb403c94c84f92a16ac55aa8072f47ccb08210a0aba77fda76f939699f66975c"
+        },
+        {
+          "path": "src/refinements.css",
+          "sha256": "adae048ac4cda7fb7c478ca91bd20e88eb02640651fb636328795eec91e3743b"
+        },
+        {
+          "path": "src/reply-drafts.ts",
+          "sha256": "b7bee5a21d3e3478c57578dba95ef1480c07debd7983f5f7aa703d8a23d57fd3"
+        },
+        {
+          "path": "src/version.ts",
+          "sha256": "1ca71255f3cdd3d4cff220889c62568a361300e55307969c8c6c392a365fb5d9"
+        },
+        {
+          "path": "src/workflow.ts",
+          "sha256": "dce757d20be82a27404e72cf0c896571137f102809a37ac218bdadab8475c59e"
+        },
+        {
+          "path": "tests/e2e/binding-desk.spec.ts",
+          "sha256": "a18fa28ede7e0e0a10b85a7324d10bb118da5765b739b5ac9f33c32efb720a32"
+        },
+        {
+          "path": "tests/e2e/cloudflare.spec.ts",
+          "sha256": "37d85a32365805db68b35af60d8b5a491a1393850d2e07eeef292a679d1ffba4"
+        },
+        {
+          "path": "tests/e2e/conversation-cleanup.spec.ts",
+          "sha256": "731ed56a90e6b402fd257bec5e7ff66dd5ebd93f6ebd5b3b73d2f23ece16c168"
+        },
+        {
+          "path": "tests/e2e/html-preview.spec.ts",
+          "sha256": "b78f7cbeb03af1b81e051b5b255f7221e8e3ec100b3d0daabc098b36c017942f"
+        },
+        {
+          "path": "tests/e2e/office-workflows.spec.ts",
+          "sha256": "0e0cc6383ff63071e465fb2e3edcf709b35f8af83107b4e914934b32ca2dc670"
+        },
+        {
+          "path": "tests/e2e/record-cleanup.spec.ts",
+          "sha256": "7ea7b21421fe906716dd61ff44de185fa9ffaf22d4186ebfa8c071bd2ab8a85f"
+        },
+        {
+          "path": "tests/e2e/settings-backup.spec.ts",
+          "sha256": "ce7ea0a00d257b1d3ce9b40e514e894f75bd6e7c92689962c6373a32cb9b1d64"
+        },
+        {
+          "path": "tests/e2e/usability.spec.ts",
+          "sha256": "23bbb38801fdc39dfa18710218f9c1f94ebda58c0d16d25bad9ff1e80792d3d1"
+        },
+        {
+          "path": "tests/e2e/workflow.spec.ts",
+          "sha256": "dd73a5be6b8001f7857f46d07a8eed3fb18f0e40f0c3c2a4ef607b4fc5b6e6c7"
+        },
+        {
+          "path": "tests/migration-upgrade.test.ts",
+          "sha256": "d2d8d6f8d71688f8b6f23685f84761d0c926b2a6fa4acf2937b2caaa440b1323"
+        },
+        {
+          "path": "tests/migrations.ts",
+          "sha256": "27e57c3fecf8198e90a68ff6fa11e7ec7bc355f8ec12b7afc580cb31b0f3bc13"
+        },
+        {
+          "path": "tests/worker.test.ts",
+          "sha256": "c824d4c7780c889817c5b6986d26c7f34d996c8eabfe264d0cd890645c6a5a11"
+        },
+        {
+          "path": "worker/commands.ts",
+          "sha256": "68cf390f94023fa258cac9cf73d9df2be26a6b2c89bc08e2ac56f788931c7fb4"
+        },
+        {
+          "path": "worker/handover-history.ts",
+          "sha256": "cf9e3441c645a345d4e3c3e6f6408f0cd4af14f6dd0b812c8aaaad9422097a4c"
+        },
+        {
+          "path": "worker/index.ts",
+          "sha256": "68180ff0055cd920b0e3e16cc241c2dd0988fdca7a72d4d158e899272d907a25"
+        },
+        {
+          "path": "worker/line.ts",
+          "sha256": "0645d73a533e78db142c732ce61ba9bd7c80b6733aec978bd0b979b1fc5e2bf8"
+        },
+        {
+          "path": "worker/pickup-items.ts",
+          "sha256": "62a291497199bdfb306af65f2bcf85a019f5116e634aaf986b06a3353eb8b02b"
+        },
+        {
+          "path": "worker/pickups.ts",
+          "sha256": "3715af30a541e56f27415cae4d1b0691bc3d4905e90702fde732b1e2f3e61069"
+        },
+        {
+          "path": "worker/record-cleanup.ts",
+          "sha256": "0cc884c6f80eab03406bcfae5844d5305e19338aa5d2fe7120480eb09b9fc66c"
+        }
+      ]
+    },
+    {
+      "name": "office-line-notifier-html-preview.zip",
+      "bytes": 701500,
+      "sha256": "50674195721d0fb25d46ccfe71704267f03dd132805f9d71151448811f54d2c6"
+    }
+  ]
 }

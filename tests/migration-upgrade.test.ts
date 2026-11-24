@@ -49,3 +49,18 @@ it('0003 從舊版升級保留帳號、綁定、信件及文字通知，新增�
   await expect(db.prepare("UPDATE notifications SET pickup_name='教材' WHERE id='old-mail'").run()).rejects.toThrow();await expect(db.prepare("UPDATE notifications SET pickup_name=' ' WHERE id='old-custom'").run()).rejects.toThrow();
  }finally{await mf.dispose();}
 });
+it('0006 保留舊物品、失敗通知與教師綁定，逐筆回填且新通知自動建立獨立物品',async()=>{
+ const {splitMigration}=await import('./migrations'),{readdirSync}=await import('node:fs');
+ const mf=new Miniflare({modules:true,script:"export default {fetch(){return new Response('測試')}}",compatibilityDate:'2026-07-01',d1Databases:['DB']});
+ try{
+  const db=await mf.getD1Database('DB');for(const name of readdirSync('migrations').filter(n=>n.endsWith('.sql')&&n<'0006').sort())await db.batch(splitMigration(readFileSync('migrations/'+name,'utf8')).map(sql=>db.prepare(sql)));
+  const at=new Date().toISOString();await db.prepare("INSERT INTO admins VALUES('upgrade6','upgrade6','虛構管理員','僅供遷移測試','admin',1,?,?)").bind(at,at).run();
+  await db.prepare("INSERT INTO teachers(id,name,line_user_id,bound_at,created_at,updated_at) VALUES('teacher6','虛構升級教師','U-mock-upgrade6',?,?,?)").bind(at,at,at).run();
+  for(const [id,kind,status,send,pickup]of [['mail6','mail','待領取','accepted',null],['parcel6','parcel','待領取','failed',null],['custom6','custom','已完成','accepted','教材'],['text6','custom','待回覆','accepted',null]])await db.prepare("INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,status,created_at,send_status,pickup_name) VALUES(?,?,'teacher6',?,'既有行政紀錄','upgrade6',0,?,?,?,?,?)").bind(id,id,kind,id,status,at,send,pickup).run();
+  await db.batch(splitMigration(readFileSync('migrations/0006_office_workflows.sql','utf8')).map(sql=>db.prepare(sql)));
+  expect((await db.prepare('SELECT count(*) AS n FROM pickup_items').first())?.n).toBe(3);expect((await db.prepare("SELECT status FROM pickup_items WHERE id='parcel6'").first())?.status).toBe('待領取');expect((await db.prepare("SELECT status FROM pickup_items WHERE id='custom6'").first())?.status).toBe('已完成');expect((await db.prepare("SELECT pickup_item_id FROM notifications WHERE id='text6'").first())?.pickup_item_id).toBeNull();
+  expect((await db.prepare('SELECT line_user_id FROM teachers').first())?.line_user_id).toBe('U-mock-upgrade6');
+  await db.prepare("INSERT INTO notifications(id,request_id,teacher_id,kind,content,sender_id,binding_version,retry_key,status,created_at) VALUES('new6','new6','teacher6','parcel','新包裹','upgrade6',0,'new6','待領取',?)").bind(at).run();
+  expect((await db.prepare("SELECT pickup_item_id FROM notifications WHERE id='new6'").first())?.pickup_item_id).toBe('new6');expect((await db.prepare('PRAGMA foreign_key_check').all()).results).toHaveLength(0);
+ }finally{await mf.dispose();}
+});

@@ -24,7 +24,7 @@ test('自動備份僅在授權且頁面可見時執行，其他分頁仍可排�
  await page.getByRole('button',{name:'值班工作台',exact:true}).click();await page.clock.fastForward(86461000);await expect.poll(()=>page.evaluate(()=>(window as any).__backupWrites.length)).toBe(2);
  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});await page.clock.fastForward(86461000);expect(await page.evaluate(()=>(window as any).__backupWrites.length)).toBe(2);
  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'));});await expect.poll(()=>page.evaluate(()=>(window as any).__backupWrites.length)).toBe(3);
- await page.getByRole('button',{name:'切換為行政人員'}).click();await page.clock.fastForward(86461000);expect(await page.evaluate(()=>(window as any).__backupWrites.length)).toBe(3);await expect(page.getByRole('button',{name:'系統管理',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'切換為工讀生'}).click();await page.clock.fastForward(86461000);expect(await page.evaluate(()=>(window as any).__backupWrites.length)).toBe(3);await expect(page.getByRole('button',{name:'系統管理',exact:true})).toHaveCount(0);
 });
 test('資料夾授權撤銷後暫停自動備份，重新開啟頁面需要再次選擇資料夾',async({page})=>{
  await fakeFolder(page);await page.clock.install();await page.goto('/');const panel=await backup(page);await panel.getByRole('button',{name:'選擇自動備份資料夾'}).click();await panel.getByLabel('自動備份間隔').selectOption('24');await expect.poll(()=>page.evaluate(()=>(window as any).__backupWrites.length)).toBe(1);

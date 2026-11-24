@@ -1,17 +1,19 @@
 import type {Data} from './api';
 import {cleanupOptions,cleanupPlanCutoff,cleanupLimits,cleanupTotal,type CleanupOptions,type CleanupPreview} from './cleanup';
-type Demo=Data&{views?:{sequence:number}[];undo_actions?:{type:string;before:any;expires_at:number;used?:boolean}[];archived_requests?:string[]};
-type Targets={messages:string[];notifications:string[];handovers:string[];audits:string[];failed:string[]};
+type Demo=Data&{views?:{sequence:number}[];undo_actions?:{type:string;before:any;expires_at:number;used?:boolean}[];pickup_undo?:Record<string,{before:{id:string}[];expires_at:number;used?:boolean}>;archived_requests?:string[]};
+type Targets={messages:string[];notifications:string[];handovers:string[];audits:string[];failed:string[];items:string[]};
 const jobs=new Map<string,{actor:string;options:CleanupOptions;cutoff:string;targets:Targets;versions:Record<string,number|undefined>;preview:CleanupPreview;messageStamp:Record<string,string>;done?:boolean}>();
 function candidates(d:Demo,options:CleanupOptions,cutoff:string,limited=true):Targets{
  const activeUndo=(type:string,id:string)=>d.undo_actions?.some(u=>u.type===type&&u.before.id===id&&!u.used&&u.expires_at>Date.now()/1000);
+ const itemUndo=(id:string)=>Object.values(d.pickup_undo||{}).some(u=>!u.used&&u.expires_at>Date.now()/1000&&u.before.some(item=>item.id===id));
  const trim=<T,>(rows:T[],size:number)=>limited?rows.slice(0,size):rows;
- const messages=options.contact?trim(d.messages.filter(m=>m.created_at<cutoff&&d.conversations.some(c=>c.teacher_id===m.teacher_id&&c.status==='已完成')&&d.messages.filter(x=>x.teacher_id===m.teacher_id).at(-1)?.id!==m.id&&!d.notifications.some(n=>n.teacher_id===m.teacher_id&&(n.status!=='已完成'||['queued','sending','uncertain'].includes(n.send_status)||activeUndo('notification',n.id)))),cleanupLimits.messages).map(m=>m.id):[];
- const notifications=options.contact?trim(d.notifications.filter(n=>n.created_at<cutoff&&n.completed_at&&n.completed_at<cutoff&&n.status==='已完成'&&(options.failed?n.send_status==='accepted':['accepted','failed'].includes(n.send_status))&&!activeUndo('notification',n.id)&&!d.messages.some(m=>m.notification_id===n.id&&!messages.includes(m.id))),cleanupLimits.notifications).map(n=>n.id):[];
- const failed=options.failed?trim(d.notifications.filter(n=>n.created_at<cutoff&&n.send_status==='failed'&&!n.sent_at&&!d.messages.some(m=>m.notification_id===n.id)&&!activeUndo('notification',n.id)),cleanupLimits.notifications-notifications.length).map(n=>n.id):[];
+ const messages=options.contact?trim(d.messages.filter(m=>m.created_at<cutoff&&!d.pickup_items?.some(item=>item.teacher_id===m.teacher_id&&item.status==='待領取')&&d.conversations.some(c=>c.teacher_id===m.teacher_id&&c.status==='已完成')&&d.messages.filter(x=>x.teacher_id===m.teacher_id).at(-1)?.id!==m.id&&!d.notifications.some(n=>n.teacher_id===m.teacher_id&&(n.status!=='已完成'||['queued','sending','uncertain'].includes(n.send_status)||activeUndo('notification',n.id)))),cleanupLimits.messages).map(m=>m.id):[];
+ const notifications=options.contact?trim(d.notifications.filter(n=>n.created_at<cutoff&&n.completed_at&&n.completed_at<cutoff&&n.status==='已完成'&&(options.failed?n.send_status==='accepted':['accepted','failed'].includes(n.send_status))&&!itemUndo(n.pickup_item_id||'')&&!activeUndo('notification',n.id)&&!d.messages.some(m=>m.notification_id===n.id&&!messages.includes(m.id))),cleanupLimits.notifications).map(n=>n.id):[];
+ const failed=options.failed?trim(d.notifications.filter(n=>n.created_at<cutoff&&n.send_status==='failed'&&!n.sent_at&&!d.messages.some(m=>m.notification_id===n.id)&&!itemUndo(n.pickup_item_id||'')&&!activeUndo('notification',n.id)),cleanupLimits.notifications-notifications.length).map(n=>n.id):[];
  const handovers=options.handovers?trim(d.handovers.filter(h=>h.created_at<cutoff&&h.completed_at&&h.completed_at<cutoff&&!activeUndo('handover',h.id)),cleanupLimits.handovers).map(h=>h.id):[];
  const audits=options.audits?trim(d.audit_logs.filter(a=>a.created_at<cutoff&&a.action!=='records_cleanup'),cleanupLimits.audits).map(a=>a.id):[];
- return {messages,notifications,handovers,audits,failed};
+ const items=options.items?trim((d.pickup_items||[]).filter(item=>item.created_at<cutoff&&['已完成','已取消'].includes(item.status)&&(item.completed_at||item.cancelled_at||'')<cutoff&&!itemUndo(item.id)&&!d.notifications.some(n=>n.pickup_item_id===item.id&&![...notifications,...failed].includes(n.id))),cleanupLimits.items).map(item=>item.id):[];
+ return {messages,notifications,handovers,audits,failed,items};
 }
 export function mockCleanup(action:string,p:any,d:Demo,actor:string){
  if(action==='mock_cleanup_failed_seed'){
@@ -31,10 +33,10 @@ export function mockCleanup(action:string,p:any,d:Demo,actor:string){
   return {};
  }
  if(action==='records_cleanup_preview'){
-  const options=cleanupOptions(p),cutoff=cleanupPlanCutoff(options),targets=candidates(d,options,cutoff),counts={messages:targets.messages.length,notifications:targets.notifications.length+targets.failed.length,handovers:targets.handovers.length,audits:targets.audits.length,revisions:d.handover_revisions.filter(r=>targets.handovers.includes(r.handover_id)).length,...(options.failed?{failed_notifications:targets.failed.length}:{})};
+  const options=cleanupOptions(p),cutoff=cleanupPlanCutoff(options),targets=candidates(d,options,cutoff),counts={messages:targets.messages.length,notifications:targets.notifications.length+targets.failed.length,handovers:targets.handovers.length,audits:targets.audits.length,revisions:d.handover_revisions.filter(r=>targets.handovers.includes(r.handover_id)).length,...(options.failed?{failed_notifications:targets.failed.length}:{}),...(options.items?{items:targets.items.length}:{})};
   const preview:CleanupPreview={job_id:crypto.randomUUID(),before:options.before,counts,expires_at:Math.floor(Date.now()/1000)+600,limited:(Object.keys(cleanupLimits) as (keyof typeof cleanupLimits)[]).some(k=>counts[k]===cleanupLimits[k]),...(options.all_dates?{all_dates:true}:{})};
   for(const [id,job] of jobs)if(job.preview.expires_at<Date.now()/1000&&!job.done)jobs.delete(id);
-  jobs.set(preview.job_id,{actor,options,cutoff,targets,preview,messageStamp:Object.fromEntries(d.messages.filter(m=>targets.messages.includes(m.id)).map(m=>[m.id,JSON.stringify(m)])),versions:Object.fromEntries([...d.notifications,...d.handovers].map(x=>[x.id,x.version]))});return preview;
+  jobs.set(preview.job_id,{actor,options,cutoff,targets,preview,messageStamp:Object.fromEntries(d.messages.filter(m=>targets.messages.includes(m.id)).map(m=>[m.id,JSON.stringify(m)])),versions:Object.fromEntries([...d.notifications,...d.handovers,...(d.pickup_items||[])].map(x=>[x.id,x.version]))});return preview;
  }
  if(action!=='records_cleanup_execute')return undefined;
  if(p.confirmation!=='刪除紀錄')throw Error('請輸入「刪除紀錄」確認');
@@ -44,11 +46,12 @@ export function mockCleanup(action:string,p:any,d:Demo,actor:string){
  if(!cleanupTotal(job.preview.counts))throw Error('沒有可清理的紀錄');
  const live=candidates(d,job.options,job.cutoff,false),targets=job.targets,noticeIds=[...targets.notifications,...targets.failed];
  if(d.messages.some(m=>targets.messages.includes(m.id)&&job.messageStamp[m.id]!==JSON.stringify(m)))throw Error('紀錄已更新，尚未刪除任何資料，請重新預覽');
- if((Object.keys(targets) as (keyof Targets)[]).some(k=>targets[k].some(id=>!live[k].includes(id)))||[...d.notifications,...d.handovers].some(x=>(noticeIds.includes(x.id)||targets.handovers.includes(x.id))&&x.version!==job.versions[x.id]))throw Error('紀錄已更新，尚未刪除任何資料，請重新預覽');
+ if((Object.keys(targets) as (keyof Targets)[]).some(k=>targets[k].some(id=>!live[k].includes(id)))||[...d.notifications,...d.handovers,...(d.pickup_items||[])].some(x=>(noticeIds.includes(x.id)||targets.handovers.includes(x.id)||targets.items.includes(x.id))&&x.version!==job.versions[x.id]))throw Error('紀錄已更新，尚未刪除任何資料，請重新預覽');
  const teachers=new Set([...d.messages.filter(m=>targets.messages.includes(m.id)).map(m=>m.teacher_id),...d.notifications.filter(n=>noticeIds.includes(n.id)).map(n=>n.teacher_id)]);
  d.archived_requests ||= [];for(const n of d.notifications as any[])if(noticeIds.includes(n.id)&&n.request_id)d.archived_requests.push(n.request_id);
  for(const view of d.views||[])view.sequence=d.messages.slice(0,view.sequence).filter(m=>!targets.messages.includes(m.id)).length;
  d.messages=d.messages.filter(m=>!targets.messages.includes(m.id));d.notifications=d.notifications.filter(n=>!noticeIds.includes(n.id));
+ d.pickup_items=d.pickup_items?.filter(item=>!targets.items.includes(item.id));
  d.handovers=d.handovers.filter(h=>!targets.handovers.includes(h.id));d.handover_revisions=d.handover_revisions.filter(r=>!targets.handovers.includes(r.handover_id));
  d.audit_logs=d.audit_logs.filter(a=>!targets.audits.includes(a.id));for(const a of d.audit_logs)if(targets.handovers.includes(a.handover_id))a.handover_id=null;
  d.undo_actions=d.undo_actions?.filter(u=>!(u.type==='notification'?noticeIds:targets.handovers).includes(u.before.id));

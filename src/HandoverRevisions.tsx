@@ -1,0 +1,9 @@
+import {useEffect,useState} from 'react';
+import {command,type Handover,type HandoverRevision} from './api';
+const format=(value?:string|null)=>value?new Date(value).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'}):'—';
+const labels:Record<string,string>={handover_create:'新增交接',handover_complete:'標記完成',handover_edit:'更正交接',handover_reopen:'恢復待處理',handover_undo:'復原完成'};
+export function HandoverRevisions({item}:{item:Handover}){
+ const [rows,setRows]=useState<HandoverRevision[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState('');
+ useEffect(()=>{let cancelled=false;void command('handover_revisions',{id:item.id}).then(result=>{if(!cancelled)setRows(result.items);}).catch(e=>{if(!cancelled)setError(e.message);}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[item.id]);
+ return <><h2>交接修改紀錄</h2>{loading&&<p role="status">正在載入修改紀錄…</p>}{error&&<p className="error" role="alert">{error}</p>}<div className="handover-change-list">{rows.map(revision=><details className="handover-change" key={revision.id}><summary>{labels[revision.action]||revision.action}<small>{revision.actor_name} · {format(revision.created_at)}</small></summary>{revision.reason&&<p>原因：{revision.reason}</p>}<table><thead><tr><th>欄位</th><th>修改前</th><th>修改後</th></tr></thead><tbody>{[['內容',revision.before_data?.content,revision.after_data.content],['交接人',revision.before_data?.handover_name,revision.after_data.handover_name],['完成人',revision.before_data?.finisher_name,revision.after_data.finisher_name],['狀態',revision.before_data?(revision.before_data.completed_at?'已完成':'待處理'):'—',revision.after_data.completed_at?'已完成':'待處理'],['完成時間',format(revision.before_data?.completed_at),format(revision.after_data.completed_at)]].map(([label,before,after])=><tr key={label}><th>{label}</th><td>{before||'—'}</td><td>{after||'—'}</td></tr>)}</tbody></table></details>)}{!loading&&!error&&!rows.length&&<p className="hint">此筆交接尚無修改紀錄。</p>}</div></>;
+}
